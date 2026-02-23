@@ -134,3 +134,10 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+.claude
+agents
+/db.config.json
+/REEF_BUILD.md
+/reef-colony.html
+package-lock.json
+docs/TheReef_Documented_Website_API.md

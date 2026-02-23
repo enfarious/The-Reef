@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Reef Colony Interface icon -->
+  <rect width="512" height="512" rx="80" fill="#050810"></rect>
+  <!-- Outer ring -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#00e5c8" stroke-width="6" opacity="0.6"></circle>
+  <!-- Mid ring -->
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#00e5c8" stroke-width="3" opacity="0.4"></circle>
+  <!-- ◈ glyph — diamond with inner square -->
+  <polygon points="256,96 396,256 256,416 116,256" fill="none" stroke="#00e5c8" stroke-width="10" stroke-linejoin="round"></polygon>
+  <rect x="210" y="210" width="92" height="92" fill="none" stroke="#00e5c8" stroke-width="7" transform="rotate(45,256,256)"></rect>
+  <!-- Centre dot -->
+  <circle cx="256" cy="256" r="16" fill="#00e5c8" opacity="0.9"></circle>
+  <!-- Glow blobs (decorative) -->
+  <circle cx="256" cy="256" r="50" fill="#00e5c8" opacity="0.06"></circle>
+  <circle cx="160" cy="310" r="30" fill="#0097ff" opacity="0.10"></circle>
+  <circle cx="352" cy="200" r="28" fill="#a855f7" opacity="0.10"></circle>
+</svg></svg><style>@media (prefers-color-scheme: light) { :root { filter: none; } }
+@media (prefers-color-scheme: dark) { :root { filter: none; } }
+</style></svg>
