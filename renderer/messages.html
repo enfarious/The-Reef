@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self';">
+<title>The Reef — Colony Messages</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="inspector.css">
+</head>
+<body>
+<div class="insp-shell">
+  <div class="insp-header">
+    <span class="insp-title">✉ COLONY MESSAGES</span>
+    <select class="insp-select" id="filterPersona">
+      <option value="">all entities</option>
+    </select>
+    <select class="insp-select" id="filterRead">
+      <option value="">all messages</option>
+      <option value="unread">unread only</option>
+      <option value="read">read only</option>
+    </select>
+    <button class="insp-btn" id="refreshBtn">⟳ REFRESH</button>
+  </div>
+  <div class="insp-body">
+    <div class="card-list" id="cardList">
+      <div class="insp-empty"><div class="insp-empty-glyph">✉</div>LOADING…</div>
+    </div>
+  </div>
+  <div class="insp-footer" id="statusBar">—</div>
+</div>
+<script src="messages.js"></script>
+</body>
+</html>

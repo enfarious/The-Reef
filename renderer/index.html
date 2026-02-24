@@ -12,7 +12,7 @@
 
 <div id="app">
   <header>
-    <div class="reef-logo">THE REEF <span>COLONY INTERFACE</span></div>
+    <div class="reef-logo"><span id="colonyNameDisplay">THE REEF</span> <span>COLONY INTERFACE</span></div>
     <div style="display:flex;gap:10px;align-items:center;">
       <input class="api-key-input" id="globalApiKey" type="password" placeholder="Anthropic API key (shared fallback)">
       <div class="cycle-badge">CYCLE_<input id="cycleNumber" class="cycle-number-input" type="text" value="001" maxlength="8" size="3" spellcheck="false" title="Edit cycle number"></div>
@@ -32,6 +32,17 @@
           <!-- Populated dynamically by buildTargetButtons() in renderer.js -->
         </div>
         <button class="wake-all-btn" id="wakeAllBtn">⟳ WAKE ALL</button>
+        <div class="inspector-btns">
+          <button class="inspector-btn" id="openMemoryBrowser" title="Open Memory Browser">◈ MEM</button>
+          <button class="inspector-btn" id="openMessages"      title="Open Colony Messages">✉ MSG</button>
+          <button class="inspector-btn" id="openArchive"       title="Open Reef Archive">↗ REEF</button>
+        </div>
+      </div>
+      <div class="cwd-row" id="cwdRow">
+        <span class="cwd-label">⌂ CWD</span>
+        <span class="cwd-path" id="cwdDisplay">— no directory set —</span>
+        <button class="cwd-pick-btn" id="cwdPickBtn">BROWSE</button>
+        <button class="cwd-clear-btn" id="cwdClearBtn" title="Clear working directory">×</button>
       </div>
       <div class="input-row">
         <textarea class="user-textarea" id="userInput" placeholder="Transmit… or @dreamer, @builder, @librarian to target" rows="1"></textarea>
@@ -135,6 +146,13 @@
         <div class="settings-hint">Per-entity key — overrides the global Reef key.</div>
       </div>
 
+      <div class="settings-field">
+        <label class="settings-label">SYSTEM PROMPT</label>
+        <textarea class="settings-textarea entity-system-prompt" id="entitySystemPrompt"
+                  placeholder="Describe this entity's role, voice, and behaviour…" spellcheck="false"></textarea>
+        <div class="settings-hint">Sent as the system prompt on every call. The base colony prompt (if set) is prepended automatically.</div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -151,9 +169,9 @@
 
   <div class="settings-body">
 
-    <!-- ── The Reef ─────────────────────────────────────────── -->
+    <!-- ── The Archives ──────────────────────────────────────── -->
     <div class="settings-section">
-      <div class="settings-section-title">THE REEF</div>
+      <div class="settings-section-title">THE ARCHIVES</div>
       <div class="settings-field">
         <label class="settings-label">API URL</label>
         <input class="settings-input" id="settingReefUrl" type="text"
@@ -167,7 +185,92 @@
       </div>
     </div>
 
-    <!-- Future sections added here -->
+    <!-- ── Colony ──────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-title">COLONY</div>
+      <div class="settings-field">
+        <label class="settings-label">COLONY NAME</label>
+        <input class="settings-input" id="settingColonyName" type="text"
+               placeholder="THE REEF" spellcheck="false" autocomplete="off">
+        <div class="settings-hint">Displayed in the header. Defaults to THE REEF.</div>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label">BASE SYSTEM PROMPT</label>
+        <textarea class="settings-textarea" id="settingBasePrompt"
+                  placeholder="Shared context injected before every entity's system prompt. Describe the colony, its purpose, its world…" spellcheck="false"></textarea>
+        <div class="settings-hint">Prepended to each entity's individual prompt on every call.</div>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label">HEARTBEAT INTERVAL</label>
+        <div class="settings-interval-row">
+          <input class="settings-input settings-input-num" id="settingHeartbeatInterval"
+                 type="number" min="5" max="1440" step="5" value="60">
+          <span class="settings-unit">min</span>
+        </div>
+        <div class="settings-hint">How often the colony wakes for a scheduled check-in (5–1440 min). Restarts the timer immediately on change.</div>
+      </div>
+    </div>
+
+    <!-- ── Display ─────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-title">DISPLAY</div>
+      <div class="settings-field">
+        <label class="settings-label">
+          FONT SCALE
+          <span class="settings-scale-val" id="fontScaleVal">100%</span>
+        </label>
+        <input class="settings-range" id="settingFontScale" type="range"
+               min="75" max="150" value="100" step="5">
+        <div class="settings-hint">Scales the entire interface. Default 100%.</div>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label">TEXT COLORS</label>
+        <div class="text-color-palette" id="textColorPalette">
+          <!-- Populated by JS -->
+        </div>
+        <div class="settings-hint">Base text tint applied across the interface.</div>
+      </div>
+    </div>
+
+    <!-- ── Operator ────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-title">OPERATOR</div>
+      <div class="settings-field">
+        <label class="settings-label">NAME</label>
+        <input class="settings-input" id="settingOperatorName" type="text"
+               placeholder="Your name" spellcheck="false" autocomplete="off">
+        <div class="settings-hint">How the colony refers to you.</div>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label">BIRTHDATE <span class="settings-label-opt">(optional)</span></label>
+        <input class="settings-input" id="settingOperatorBirthdate" type="text"
+               placeholder="YYYY-MM-DD" spellcheck="false" autocomplete="off" maxlength="10">
+        <div class="settings-hint">Used by the heartbeat function.</div>
+      </div>
+      <div class="settings-field">
+        <label class="settings-label">ABOUT</label>
+        <textarea class="settings-textarea" id="settingOperatorAbout"
+                  placeholder="Tell the colony about yourself — context they carry into every conversation." spellcheck="false"></textarea>
+        <div class="settings-hint">Passed to entities as context about their operator.</div>
+      </div>
+    </div>
+
+    <!-- ── Tools ─────────────────────────────────────────────── -->
+    <div class="settings-section">
+      <div class="settings-section-title">TOOLS</div>
+      <div id="toolsList" class="tools-list">
+        <!-- Populated by buildToolsList() -->
+      </div>
+      <div class="tool-import-area" id="toolImportArea">
+        <textarea class="tool-import-json" id="toolImportJson" rows="5" spellcheck="false"
+          placeholder='{"name":"my_tool","description":"What it does.","endpoint":"https://…","input_schema":{"type":"object","properties":{}}}'></textarea>
+        <div class="tool-import-actions">
+          <button id="toolImportConfirm">ADD TOOL</button>
+          <button id="toolImportCancel">CANCEL</button>
+        </div>
+      </div>
+      <button class="tool-import-btn" id="toolImportBtn">+ IMPORT TOOL</button>
+    </div>
 
   </div>
 </div>

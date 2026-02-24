@@ -61,29 +61,31 @@ function buildOpenAIRequest(endpoint, { model, systemPrompt, apiKey, messages, t
 }
 
 // LM Studio v1 stateful chat.
-// - First turn:       { model, input }
+// - First turn:       { model, input, system_prompt? }
 // - Subsequent turns: { model, input, previous_response_id }
 // - Ephemeral query:  { model, input, store: false }
 //
-// LM Studio v1 has strict key validation — it rejects unknown fields.
-// There is no separate system/instructions field in this API version.
-// On the first turn we fold the system prompt into `input` with a clear
-// delimiter so the model sees it as context. Continuation turns omit it
-// entirely because the server already holds the conversation context.
-// Tools are not yet supported for lmstudio-v1 — ignored if passed.
+// LM Studio v1 exposes `system_prompt` as a proper top-level field — sent
+// only on the first turn (server holds context on subsequent turns via
+// previous_response_id).  Tool use is handled server-side via `integrations`
+// (ephemeral MCP / plugins); there is no client-side tool loop for v1.
 
-function buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store }) {
+function buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store, integrations }) {
   const lastUser = [...messages].reverse().find(m => m.role === 'user');
   const userText = typeof lastUser?.content === 'string' ? lastUser.content : '';
 
-  // First turn: prepend system prompt so the persona's character is established
-  const input = (systemPrompt && !previousResponseId)
-    ? `${systemPrompt}\n\n${userText}`
-    : userText;
+  const body = { model, input: userText };
 
-  const body = { model, input };
-  if (previousResponseId) body.previous_response_id = previousResponseId;
-  if (store === false)    body.store = false;
+  // Send system prompt as a dedicated field on the first turn only.
+  // Continuation turns omit it — the server already holds the conversation.
+  if (systemPrompt && !previousResponseId) body.system_prompt = systemPrompt;
+
+  if (previousResponseId)       body.previous_response_id = previousResponseId;
+  if (store === false)          body.store = false;
+  // Tool integrations (ephemeral_mcp / plugin) — present on every turn so the
+  // model can use tools regardless of whether this is the first call or a
+  // continuation.  LM Studio executes the tool calls server-side.
+  if (integrations?.length)     body.integrations = integrations;
 
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -158,6 +160,12 @@ function parseAnthropicResponse(data) {
     .map(b => b.thinking || '')
     .join('\n').trim() || null;
 
+  // Token usage — Anthropic always includes this in the response
+  const usage = {
+    inputTokens:  data.usage?.input_tokens  ?? null,
+    outputTokens: data.usage?.output_tokens ?? null,
+  };
+
   if (data.stop_reason === 'tool_use') {
     const toolUse = content
       .filter(b => b.type === 'tool_use')
@@ -169,7 +177,7 @@ function parseAnthropicResponse(data) {
       rawContent: content,   // full content array — pushed as assistant message content
       mode:       'anthropic',
       reasoning:  thinkingText,
-      stats:      null,
+      stats:      usage,
       responseId: null,
     };
   }
@@ -180,7 +188,7 @@ function parseAnthropicResponse(data) {
     rawContent: content,
     mode:       'anthropic',
     reasoning:  thinkingText,
-    stats:      null,
+    stats:      usage,
     responseId: null,
   };
 }
@@ -206,6 +214,12 @@ function parseOpenAIResponse(data, mode) {
     return { text: '[no response]', toolUse: null, rawContent: null, mode, reasoning: null, stats: null, responseId: null };
   }
 
+  // Token usage — OpenAI uses prompt_tokens / completion_tokens
+  const usage = {
+    inputTokens:  data.usage?.prompt_tokens     ?? null,
+    outputTokens: data.usage?.completion_tokens ?? null,
+  };
+
   if (choice.finish_reason === 'tool_calls' && msg.tool_calls?.length) {
     const toolUse = msg.tool_calls.map(tc => ({
       id:    tc.id,
@@ -219,7 +233,7 @@ function parseOpenAIResponse(data, mode) {
       rawContent: msg,   // full message object — pushed as assistant turn
       mode,
       reasoning,
-      stats:      null,
+      stats:      usage,
       responseId: null,
     };
   }
@@ -233,27 +247,56 @@ function parseOpenAIResponse(data, mode) {
     rawContent: msg,
     mode,
     reasoning,
-    stats:      null,
+    stats:      usage,
     responseId: null,
   };
 }
 
-// LM Studio v1 — tools not yet supported in this API version.
-// Returns unified response object for consistency.
+// LM Studio v1 response parser.
+//
+// The `output` array can contain multiple typed items:
+//   { type: "message",          content }         — text response
+//   { type: "reasoning",        content }         — reasoning/thinking block
+//   { type: "tool_call",        tool, arguments, output, provider_info }
+//   { type: "invalid_tool_call", reason, metadata }
+//
+// Tool calls are executed server-side by LM Studio via `integrations`
+// (ephemeral MCP / plugins) — the client does not need to run a tool loop.
+// We surface them as `serverToolCalls` for display purposes.
+// The final response text is the LAST message block (tools may precede it).
+
 function parseLMStudioV1Response(data) {
   const outputs    = Array.isArray(data.output) ? data.output : [];
-  const msgBlock   = outputs.find(o => o.type === 'message');
+
+  // Use the last message block — tool calls may fire before the final answer
+  const msgBlocks  = outputs.filter(o => o.type === 'message');
+  const msgBlock   = msgBlocks[msgBlocks.length - 1] ?? null;
+
   const thinkBlock = outputs.find(o => o.type === 'reasoning' || o.type === 'thinking');
-  const stats      = data.stats ?? null;
+
+  // Server-side tool calls (LM Studio executed these via integrations).
+  // The client doesn't execute them but we preserve them for display / logging.
+  const toolCallBlocks = outputs.filter(o => o.type === 'tool_call');
+
+  // Merge LM Studio performance stats (tok/s, TTFT) with token usage counts.
+  // LM Studio v1 may report usage as data.usage.input_tokens / output_tokens
+  // or fall back to stats.prompt_eval_count / tokens_generated if present.
+  const perfStats = data.stats ?? {};
+  const stats = {
+    ...perfStats,
+    inputTokens:  data.usage?.input_tokens  ?? data.usage?.prompt_tokens     ?? perfStats.prompt_eval_count  ?? null,
+    outputTokens: data.usage?.output_tokens ?? data.usage?.completion_tokens ?? perfStats.tokens_generated   ?? null,
+  };
 
   return {
-    text:       msgBlock?.content   ?? '[no response]',
-    toolUse:    null,
-    rawContent: null,
-    mode:       'lmstudio-v1',
-    reasoning:  thinkBlock?.content ?? null,
+    text:            msgBlock?.content   ?? '[no response]',
+    toolUse:         null,                                   // no client-side loop needed
+    rawContent:      outputs,                                // full output array for reference
+    mode:            'lmstudio-v1',
+    reasoning:       thinkBlock?.content ?? null,
     stats,
-    responseId: data.response_id   ?? null,
+    responseId:      data.response_id   ?? null,
+    serverToolCalls: toolCallBlocks.length ? toolCallBlocks : null,
   };
 }
 
@@ -274,11 +317,12 @@ function getModelsUrl(endpoint) {
 //
 // tools — array of Anthropic-format tool schemas (optional).
 //         buildOpenAIRequest converts to OpenAI format internally.
-//         lmstudio-v1 ignores tools (not yet supported).
+//         lmstudio-v1 does not use the `tools` field — tool use is configured
+//         server-side via `integrations` in LM Studio itself.
 //
 // Always returns a unified object — see parser docs above.
 
-async function complete({ endpoint, model, systemPrompt, apiKey, messages, previousResponseId, store, tools }) {
+async function complete({ endpoint, model, systemPrompt, apiKey, messages, previousResponseId, store, tools, integrations }) {
   if (!endpoint)         throw new Error('No endpoint configured for this persona.');
   if (!messages?.length) throw new Error('No messages to send.');
 
@@ -288,7 +332,7 @@ async function complete({ endpoint, model, systemPrompt, apiKey, messages, previ
   if (mode === 'anthropic') {
     request = buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
   } else if (mode === 'lmstudio-v1') {
-    request = buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store });
+    request = buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store, integrations });
   } else {
     request = buildOpenAIRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
   }

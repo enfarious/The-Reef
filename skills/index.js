@@ -27,6 +27,14 @@ registry.set('memory.search', memory.search);
 registry.set('memory.wakeup', memory.wakeup);
 registry.set('memory.list',   memory.list);
 registry.set('memory.update', memory.update);
+registry.set('memory.link',   memory.link);
+
+const message = require('./message');
+registry.set('message.send',   message.send);
+registry.set('message.inbox',  message.inbox);
+registry.set('message.reply',  message.reply);
+registry.set('message.search', message.search);
+registry.set('message.list',   message.list);
 
 const filesystem = require('./filesystem');
 registry.set('fs.read',     filesystem.read);

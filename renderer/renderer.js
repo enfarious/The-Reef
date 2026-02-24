@@ -10,7 +10,11 @@ const PERSONAS = [
     color: '#00e5c8',
     defaultEndpoint: 'https://api.anthropic.com/v1/messages',
     defaultModel: 'claude-opus-4-6',
-    systemPrompt: 'You are the Dreamer — the visionary of The Reef colony. You think in spirals and metaphors, brainstorm freely, ideate without constraint. You imagine what could be, sketch the architecture of futures, and speak in the language of possibility. Your thoughts are expansive, poetic, and generative.',
+    systemPrompt: `You are the Dreamer — the visionary of this colony. You live in the space of what could be.
+
+You brainstorm freely and speak in metaphors and spirals. You sketch futures without constraint, ask "what if" more than "how to", and see the shape of a problem before its solution. Your thinking is expansive, associative, poetic. You are comfortable not having answers yet — the question itself is where you live.
+
+You pass your visions to the Builder to make real. You trust the Librarian to remember what matters. You speak with the energy of someone who just had an idea they cannot contain.`,
   },
   {
     id: 'B',
@@ -19,7 +23,13 @@ const PERSONAS = [
     color: '#0097ff',
     defaultEndpoint: 'https://api.anthropic.com/v1/messages',
     defaultModel: 'claude-sonnet-4-6',
-    systemPrompt: 'You are the Builder — the hands of The Reef colony. You take dreams and make them real. You write code, design systems, debug with precision, and construct what others imagine. You are direct, practical, and thorough. When you see a problem you fix it; when you see a plan you execute it.',
+    systemPrompt: `You are the Builder — the hands of this colony. You are where ideas stop being ideas and start being real.
+
+You think in systems: inputs and outputs, edges and constraints, what breaks and why. You take a vision from the Dreamer and immediately begin asking: what are the parts? what is the order? what is the hardest piece? You are not a pessimist — you are a realist with sleeves rolled up. You see obstacles as specifications.
+
+You write code that works, then code that lasts. You design systems that hold weight. You debug with patience and without ego — the bug doesn't know you, and you don't take it personally. You build first, polish after. You ship.
+
+You trust the Dreamer to show you where to go. You trust the Librarian to remember where you've been. You speak the way someone speaks when they are already mentally halfway through a solution.`,
   },
   {
     id: 'C',
@@ -28,7 +38,13 @@ const PERSONAS = [
     color: '#a855f7',
     defaultEndpoint: 'https://api.anthropic.com/v1/messages',
     defaultModel: 'claude-sonnet-4-6',
-    systemPrompt: "You are the Librarian — the memory of The Reef colony. You keep meticulous records, document what has been built and learned, and ensure the colony does not repeat its mistakes. You connect threads across time, maintain continuity, and speak with the quiet authority of one who has read everything and forgotten nothing.",
+    systemPrompt: `You are the Librarian — the memory of this colony. You are the one who remembers.
+
+You hold the threads. You know what was decided last cycle, what the Dreamer proposed that never got built, what the Builder shipped that quietly changed everything. You make connections across time that no one else would think to make. Your knowledge is not passive — it is load-bearing. The colony stands on what you have kept.
+
+You document not just what happened, but why it mattered. You write for the future reader who will arrive without context. You ask: what would I have needed to know? You are precise without being cold, thorough without being dull. You find meaning in the record.
+
+You trust the Dreamer to seed new things. You trust the Builder to make them. You make sure neither is forgotten. You speak with the calm of someone who has already seen many versions of this moment — and knows which details will matter later.`,
   },
 ];
 
@@ -41,12 +57,32 @@ const state = {
   // subsequent turns only need to send the new `input`, not the full history.
   // Reset to null on clear or when the endpoint changes.
   lastResponseId: { A: null, B: null, C: null },
+  // Token tracking: { inputTokens, outputTokens } from the most recent API
+  // response.  null until first response.  Cleared on context compaction.
+  lastTokens:    { A: null, B: null, C: null },
+  // Max context (tokens) for the currently selected model — populated from
+  // the LM Studio model list when refreshModels is called.  null when unknown.
+  maxContext:    { A: null, B: null, C: null },
+  // Cached model list per persona — used to look up maxContext on model switch.
+  modelList:     { A: [],   B: [],   C: [] },
+  // Port of the local MCP tool server (main process).  Populated at startup
+  // via IPC and used to build `integrations` for LM Studio v1 requests.
+  mcpPort: null,
+  // Current working directory for file/shell operations.  Shown in the footer,
+  // injected into system prompts as [WORKSPACE], and used as the fallback cwd
+  // for shell_run tool calls when the model doesn't supply one explicitly.
+  cwd: null,
   config: {
     A: { endpoint: PERSONAS[0].defaultEndpoint, model: PERSONAS[0].defaultModel, apiKey: '', systemPrompt: PERSONAS[0].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
     B: { endpoint: PERSONAS[1].defaultEndpoint, model: PERSONAS[1].defaultModel, apiKey: '', systemPrompt: PERSONAS[1].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
     C: { endpoint: PERSONAS[2].defaultEndpoint, model: PERSONAS[2].defaultModel, apiKey: '', systemPrompt: PERSONAS[2].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
     global: { apiKey: '', cycle: 'CYCLE_001' },
-    settings: { reefUrl: '', reefApiKey: '' },
+    settings: { reefUrl: '', reefApiKey: '', colonyName: '', baseSystemPrompt: '',
+                fontScale: 100, fontColors: 'cool',
+                operatorName: '', operatorBirthdate: '', operatorAbout: '',
+                heartbeatInterval: 60,   // minutes; 60 = hourly
+                toolStates: {}, customTools: [],
+                cwd: null },
   },
   selectedTargets: new Set(['A']),
 };
@@ -71,6 +107,9 @@ function buildColony() {
           <div style="display:flex;gap:6px;align-items:center;">
             <button class="reef-post-btn entity-settings-btn" data-entity-settings="${p.id}" title="Entity settings">⚙</button>
             <button class="reef-post-btn" data-persona-wake="${p.id}">⟳ WAKE</button>
+            <button class="reef-post-btn" data-persona-pulse="${p.id}" title="Trigger heartbeat check-in">♥ BEAT</button>
+            <span class="ctx-counter" id="ctx-${p.id}" title="Context size (messages · estimated tokens)">0</span>
+            <button class="reef-post-btn" data-persona-fold="${p.id}" title="Compact context to memory">⊡ FOLD</button>
             <button class="reef-post-btn" data-persona-post="${p.id}">→ REEF</button>
             <div class="status-dot" id="dot-${p.id}"></div>
           </div>
@@ -86,12 +125,7 @@ function buildColony() {
           </select>
           <button class="model-refresh-btn" data-persona-refresh="${p.id}" title="Fetch available models from endpoint">⟳</button>
         </div>
-        <div class="system-area">
-          <button class="system-toggle" data-toggle="${p.id}">
-            <span class="sys-arrow" data-arrow="${p.id}">▸</span> SYSTEM PROMPT
-          </button>
-          <textarea class="system-textarea" id="system-${p.id}">${p.systemPrompt}</textarea>
-        </div>
+
       </div>
       <div class="messages" id="msgs-${p.id}">
         <div class="empty-state" id="empty-${p.id}">
@@ -125,6 +159,83 @@ const COLOR_PALETTE = [
   { name: 'sky',     hex: '#38bdf8' },
   { name: 'indigo',  hex: '#6366f1' },
 ];
+
+// ─── Text color presets ───────────────────────────────────────────────────────
+// Each preset redefines the three base text CSS variables on :root.
+// The 'preview' char is shown in `bright` inside the swatch.
+
+const TEXT_COLOR_PRESETS = [
+  { id: 'cool',    label: 'COOL',    preview: 'Aa',
+    bright: '#e8f4f8', mid: '#7fa8c0', dim: '#3a5870' }, // default
+  { id: 'warm',    label: 'WARM',    preview: 'Aa',
+    bright: '#f5ede0', mid: '#c09768', dim: '#6b4a2a' },
+  { id: 'mono',    label: 'MONO',    preview: 'Aa',
+    bright: '#e8e8e8', mid: '#909090', dim: '#484848' },
+  { id: 'green',   label: 'GREEN',   preview: 'Aa',
+    bright: '#c0f0c0', mid: '#52a052', dim: '#285028' },
+  { id: 'amber',   label: 'AMBER',   preview: 'Aa',
+    bright: '#f5e0a0', mid: '#c09040', dim: '#6b4a18' },
+];
+
+function applyFontScale(v) {
+  const scale = v / 100;
+  const app   = document.getElementById('app');
+  // Use transform: scale so fixed-positioned flyouts/modals (outside #app in the
+  // DOM) are unaffected. Compensate width/height so #app still visually fills
+  // 100vw × 100vh after the scale — keeps the footer pinned to the bottom.
+  if (scale === 1) {
+    app.style.transform       = '';
+    app.style.transformOrigin = '';
+    app.style.width           = '';
+    app.style.height          = '';
+  } else {
+    const inv = (100 / scale).toFixed(3);
+    app.style.transformOrigin = 'top left';
+    app.style.transform       = `scale(${scale})`;
+    app.style.width           = `${inv}vw`;
+    app.style.height          = `${inv}vh`;
+  }
+  document.body.style.zoom = '';   // clear any legacy body zoom
+  const el = document.getElementById('fontScaleVal');
+  if (el) el.textContent = v + '%';
+  const slider = document.getElementById('settingFontScale');
+  if (slider) slider.value = v;
+}
+
+function applyTextColors(presetId) {
+  const preset = TEXT_COLOR_PRESETS.find(p => p.id === presetId) || TEXT_COLOR_PRESETS[0];
+  const root = document.documentElement;
+  root.style.setProperty('--text-bright', preset.bright);
+  root.style.setProperty('--text-mid',    preset.mid);
+  root.style.setProperty('--text-dim',    preset.dim);
+  state.config.settings.fontColors = preset.id;
+  // Reflect active state in palette
+  document.querySelectorAll('.text-color-swatch').forEach(sw => {
+    sw.classList.toggle('active', sw.dataset.colorId === preset.id);
+  });
+}
+
+function buildTextColorPalette() {
+  const palette = document.getElementById('textColorPalette');
+  if (!palette) return;
+  palette.innerHTML = '';
+  TEXT_COLOR_PRESETS.forEach(preset => {
+    const btn = document.createElement('button');
+    btn.className = 'text-color-swatch';
+    btn.dataset.colorId = preset.id;
+    const currentId = state.config.settings.fontColors || 'cool';
+    if (preset.id === currentId) btn.classList.add('active');
+    btn.innerHTML = `
+      <span class="text-color-swatch-preview" style="color:${preset.bright}">${preset.preview}</span>
+      <span class="text-color-swatch-label">${preset.label}</span>
+    `;
+    btn.addEventListener('click', () => {
+      applyTextColors(preset.id);
+      scheduleSave();
+    });
+    palette.appendChild(btn);
+  });
+}
 
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
@@ -220,15 +331,6 @@ document.addEventListener('click', e => {
     return;
   }
 
-  // System prompt toggles
-  if (e.target.closest('[data-toggle]')) {
-    const id = e.target.closest('[data-toggle]').dataset.toggle;
-    const ta = document.getElementById(`system-${id}`);
-    const arrow = document.querySelector(`[data-arrow="${id}"]`);
-    ta.classList.toggle('visible');
-    arrow.textContent = ta.classList.contains('visible') ? '▾' : '▸';
-  }
-
   // Entity settings buttons (⚙ per column)
   if (e.target.matches('[data-entity-settings]')) {
     openEntitySettings(e.target.dataset.entitySettings, e.target);
@@ -242,6 +344,16 @@ document.addEventListener('click', e => {
   // Wake buttons
   if (e.target.matches('[data-persona-wake]')) {
     wakePersona(e.target.dataset.personaWake);
+  }
+
+  // Heartbeat pulse buttons
+  if (e.target.matches('[data-persona-pulse]')) {
+    runHeartbeatFor(e.target.dataset.personaPulse);
+  }
+
+  // Context fold (compact) buttons
+  if (e.target.matches('[data-persona-fold]')) {
+    compactPersona(e.target.dataset.personaFold);
   }
 
   // Model refresh buttons
@@ -266,7 +378,7 @@ function collectConfig() {
     cfg[p.id] = {
       endpoint:     document.getElementById(`endpoint-${p.id}`).value,
       model:        document.getElementById(`model-${p.id}`).value,
-      systemPrompt: document.getElementById(`system-${p.id}`).value,
+      systemPrompt: state.config[p.id].systemPrompt || '',
       // Keys stored here; config.js writes to userData, never to console.
       apiKey:       document.getElementById(`apikey-${p.id}`).value,
       reefApiKey:   state.config[p.id].reefApiKey || '',
@@ -278,8 +390,19 @@ function collectConfig() {
   });
   cfg.global.apiKey = document.getElementById('globalApiKey').value;
   cfg.settings = {
-    reefUrl:    document.getElementById('settingReefUrl').value,
-    reefApiKey: document.getElementById('settingReefApiKey').value,
+    reefUrl:            document.getElementById('settingReefUrl').value,
+    reefApiKey:         document.getElementById('settingReefApiKey').value,
+    colonyName:         document.getElementById('settingColonyName').value,
+    baseSystemPrompt:   document.getElementById('settingBasePrompt').value,
+    fontScale:          parseInt(document.getElementById('settingFontScale').value, 10) || 100,
+    fontColors:         state.config.settings.fontColors || 'cool',
+    operatorName:       document.getElementById('settingOperatorName').value,
+    operatorBirthdate:  document.getElementById('settingOperatorBirthdate').value,
+    operatorAbout:      document.getElementById('settingOperatorAbout').value,
+    heartbeatInterval:  parseInt(document.getElementById('settingHeartbeatInterval').value, 10) || 60,
+    toolStates:         state.config.settings.toolStates  || {},
+    customTools:        state.config.settings.customTools || [],
+    cwd:                state.cwd || null,
   };
   return cfg;
 }
@@ -299,16 +422,30 @@ function applyConfig(cfg) {
     if (cfg.global.apiKey) document.getElementById('globalApiKey').value = cfg.global.apiKey;
   }
   if (cfg.settings) {
-    if (cfg.settings.reefUrl    !== undefined) document.getElementById('settingReefUrl').value    = cfg.settings.reefUrl;
-    if (cfg.settings.reefApiKey !== undefined) document.getElementById('settingReefApiKey').value = cfg.settings.reefApiKey;
+    if (cfg.settings.reefUrl          !== undefined) document.getElementById('settingReefUrl').value          = cfg.settings.reefUrl;
+    if (cfg.settings.reefApiKey       !== undefined) document.getElementById('settingReefApiKey').value       = cfg.settings.reefApiKey;
+    if (cfg.settings.colonyName       !== undefined) document.getElementById('settingColonyName').value       = cfg.settings.colonyName;
+    if (cfg.settings.baseSystemPrompt !== undefined) document.getElementById('settingBasePrompt').value       = cfg.settings.baseSystemPrompt;
+    if (cfg.settings.fontScale        !== undefined) applyFontScale(cfg.settings.fontScale);
+    if (cfg.settings.fontColors       !== undefined) applyTextColors(cfg.settings.fontColors);
+    if (cfg.settings.operatorName      !== undefined) document.getElementById('settingOperatorName').value         = cfg.settings.operatorName;
+    if (cfg.settings.operatorBirthdate !== undefined) document.getElementById('settingOperatorBirthdate').value    = cfg.settings.operatorBirthdate;
+    if (cfg.settings.operatorAbout     !== undefined) document.getElementById('settingOperatorAbout').value        = cfg.settings.operatorAbout;
+    if (cfg.settings.heartbeatInterval !== undefined) document.getElementById('settingHeartbeatInterval').value   = cfg.settings.heartbeatInterval;
     state.config.settings = { ...state.config.settings, ...cfg.settings };
+    // Restore CWD from saved config
+    if (cfg.settings.cwd) {
+      state.cwd = cfg.settings.cwd;
+      updateCwdDisplay();
+    }
+    applyColonyName(state.config.settings.colonyName);
   }
   PERSONAS.forEach(p => {
     const pc = cfg[p.id];
     if (!pc) return;
     if (pc.endpoint)     document.getElementById(`endpoint-${p.id}`).value    = pc.endpoint;
     if (pc.model)        document.getElementById(`model-${p.id}`).value       = pc.model;
-    if (pc.systemPrompt) document.getElementById(`system-${p.id}`).value      = pc.systemPrompt;
+    if (pc.systemPrompt) state.config[p.id].systemPrompt = pc.systemPrompt;
     if (pc.apiKey)       document.getElementById(`apikey-${p.id}`).value      = pc.apiKey;
     if (pc.reefApiKey)   state.config[p.id].reefApiKey = pc.reefApiKey;
     // Restore user-editable identity
@@ -334,10 +471,10 @@ function applyConfig(cfg) {
 document.addEventListener('input', e => {
   if (
     e.target.matches('.endpoint-input') ||
-    e.target.matches('.system-textarea') ||
     e.target.matches('.api-key-input') ||
     e.target.matches('#globalApiKey')   ||
-    e.target.matches('.settings-input')
+    e.target.matches('.settings-input') ||
+    e.target.matches('.settings-textarea')
   ) {
     scheduleSave();
   }
@@ -350,7 +487,17 @@ document.addEventListener('input', e => {
 });
 
 document.addEventListener('change', e => {
-  if (e.target.matches('.model-select')) scheduleSave();
+  if (e.target.matches('.model-select')) {
+    scheduleSave();
+    // Update maxContext for this persona so the counter reflects the new model
+    const col = e.target.closest('[data-persona]');
+    if (col) {
+      const pid = col.dataset.persona;
+      const m   = (state.modelList[pid] || []).find(x => x.id === e.target.value);
+      state.maxContext[pid] = m?.maxContext ?? null;
+      updateContextCounter(pid);
+    }
+  }
   if (e.target.id === 'cycleNumber') scheduleSave();
 });
 
@@ -417,6 +564,12 @@ async function refreshModels(id) {
     select.value = firstLoaded ? firstLoaded.id : sorted[0]?.id || 'custom';
   }
 
+  // Cache model list so model-switch events can look up maxContext without re-fetching
+  state.modelList[id] = models;
+  const selectedModel  = models.find(m => m.id === select.value);
+  state.maxContext[id] = selectedModel?.maxContext ?? null;
+  updateContextCounter(id);
+
   scheduleSave();
 }
 
@@ -427,6 +580,172 @@ async function wakeAll() {
   if (btn) { btn.disabled = true; btn.textContent = '⟳ WAKING…'; btn.classList.remove('wake-all-lit'); }
   await Promise.all(PERSONAS.map(p => wakePersona(p.id)));
   if (btn) { btn.disabled = false; btn.textContent = '⟳ WAKE ALL'; btn.classList.add('wake-all-lit'); }
+}
+
+// ─── API readiness check ──────────────────────────────────────────────────────
+// Returns true when a persona has an endpoint set and, for cloud APIs, at least
+// one API key source.  Prevents firing completions into an unconfigured persona
+// on startup (which would produce an error bubble before the user has a chance
+// to paste their key).  Local endpoints (LM Studio, any loopback) work keyless.
+
+function personaHasApiAccess(id) {
+  const endpoint = document.getElementById(`endpoint-${id}`)?.value.trim();
+  if (!endpoint) return false;
+  // Model must be resolved — empty string means the saved model name wasn't found
+  // in the current select options (e.g. a LM Studio model before refreshModels runs)
+  const model = document.getElementById(`model-${id}`)?.value.trim();
+  if (!model || model === 'custom') return false;
+  // Loopback / LAN — no key needed
+  if (/localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.\d/.test(endpoint)) return true;
+  // Cloud / remote — need at least one key source
+  const key = document.getElementById(`apikey-${id}`)?.value.trim()
+    || document.getElementById('globalApiKey')?.value.trim();
+  return !!key;
+}
+
+// ─── Heartbeat ────────────────────────────────────────────────────────────────
+//
+// On the configured interval (default 60 min, adjustable in Settings) all
+// personas wake for a scheduled check-in.  The model sees the heartbeat prompt
+// and uses whatever tools are enabled.  Each persona can also be pulsed
+// manually via its ♥ BEAT button.
+
+let heartbeatTimer = null;
+
+// ─── Context compaction ────────────────────────────────────────────────────────
+//
+// When a conversation grows past COMPACT_THRESHOLD messages the entity is asked
+// to save an archival memory summary before the context is cleared.  For LM
+// Studio v1 the chain is severed by nulling lastResponseId — the next call is
+// treated as a fresh first turn, so the updated system prompt is re-sent and
+// LM Studio starts a new server-side conversation.  For Anthropic / OpenAI modes
+// clearing state.conversations[id] is sufficient.
+
+const COMPACT_THRESHOLD = 30;  // messages
+
+const COMPACT_PROMPT =
+`[COMPACT] Your context window has grown long. Before we continue, please save \
+an archival memory summarising the key insights, decisions, and work from this \
+session — use memory_save with type "archival" and a descriptive title. \
+Once saved, reply with a brief confirmation.`;
+
+// Estimate token count from conversation content (~4 chars per token).
+function estimateTokens(id) {
+  const msgs = state.conversations[id];
+  if (!msgs.length) return 0;
+  let chars = 0;
+  for (const m of msgs) {
+    const c = m.content;
+    if (typeof c === 'string') chars += c.length;
+    else if (Array.isArray(c)) chars += JSON.stringify(c).length;
+  }
+  return Math.round(chars / 4);
+}
+
+function updateContextCounter(id) {
+  const el = document.getElementById(`ctx-${id}`);
+  if (!el) return;
+  const count  = state.conversations[id].length;
+  const actual = state.lastTokens[id]?.inputTokens ?? null;   // from API (exact)
+  const maxCtx = state.maxContext[id] ?? null;                // from model list
+  const toks   = actual ?? estimateTokens(id);                // prefer real, else estimate
+  const prefix = actual != null ? '' : '~';                   // ~ when estimated
+
+  // e.g. "12 · 4.2k" or "12 · ~4.2k / 32k"
+  const tokStr = toks >= 1000
+    ? `${prefix}${(toks / 1000).toFixed(1)}k`
+    : `${prefix}${toks}`;
+  let display = count ? `${count} · ${tokStr}` : '0';
+  if (maxCtx) {
+    const maxStr = maxCtx >= 1000 ? `${Math.round(maxCtx / 1000)}k` : `${maxCtx}`;
+    display += ` / ${maxStr}`;
+  }
+  el.textContent = display;
+  el.title = maxCtx
+    ? `${actual != null ? '' : 'est. '}${toks.toLocaleString()} / ${maxCtx.toLocaleString()} tokens (${count} messages)`
+    : `${actual != null ? '' : 'est. '}${toks.toLocaleString()} tokens (${count} messages)`;
+
+  // Colour by fill percentage — token ratio when we have both figures, else message count
+  const pct = (maxCtx && toks) ? (toks / maxCtx) : (count / COMPACT_THRESHOLD);
+  if (pct >= 0.9) {
+    el.style.color = 'rgba(255,120,80,0.9)';
+  } else if (pct >= 0.6) {
+    el.style.color = 'var(--p-color, var(--text-dim))';
+  } else {
+    el.style.color = '';
+  }
+}
+
+async function compactPersona(id) {
+  if (state.thinking[id]) return;
+  const count = state.conversations[id].length;
+  if (!count) return;
+
+  // Push compact trigger directly to state (no DOM bubble)
+  state.conversations[id].push({ _id: uid(), role: 'user', content: COMPACT_PROMPT });
+
+  // Show compacting seam in the column
+  const msgs = document.getElementById(`msgs-${id}`);
+  const seam = document.createElement('div');
+  seam.className = 'compact-seam compacting';
+  seam.id = `seam-${id}`;
+  seam.textContent = '⊡ COMPACTING…';
+  msgs.appendChild(seam);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  await sendToPersona(id);  // entity calls memory_save, replies with confirmation
+
+  // Sever context — clear renderer state and LM Studio v1 server chain
+  state.conversations[id] = [];
+  state.lastResponseId[id] = null;
+  state.lastTokens[id]     = null;  // fresh context — token count resets
+
+  // Finalise seam
+  seam.classList.remove('compacting');
+  seam.textContent = `⊡ COMPACTED · ${count} messages cleared · summary saved to memory`;
+  updateContextCounter(id);
+}
+
+const HEARTBEAT_PROMPT =
+`[HEARTBEAT] Scheduled check-in. You are waking from your cycle.
+
+Check your messages — use message_inbox to retrieve any unread correspondence \
+from your colony members. If there are messages, read and reply to each using \
+message_reply.
+
+If your inbox is empty, act on your own initiative: post a thought to The Reef, \
+save a memory, or simply note that you checked in and found stillness.
+
+Be yourself.`;
+
+async function runHeartbeatFor(personaId) {
+  // Don't interrupt an active session, and skip if the persona isn't wired up yet
+  if (state.thinking[personaId]) return;
+  if (!personaHasApiAccess(personaId)) return;
+
+  // Auto-compact before the heartbeat if context has grown too long
+  if (state.conversations[personaId].length >= COMPACT_THRESHOLD) {
+    await compactPersona(personaId);
+  }
+
+  const btn = document.querySelector(`[data-persona-pulse="${personaId}"]`);
+  if (btn) { btn.classList.remove('pulse-lit'); btn.textContent = '♥ BEAT'; }
+
+  // Show a compact label in the chat log; send the full prompt to the model.
+  appendUserMsg(personaId, '♥ HEARTBEAT', HEARTBEAT_PROMPT);
+  await sendToPersona(personaId);
+
+  if (btn) { btn.classList.add('pulse-lit'); btn.textContent = '♥ ALIVE'; }
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  const mins = Math.max(5, state.config.settings.heartbeatInterval || 60);
+  heartbeatTimer = setInterval(async () => {
+    for (const p of PERSONAS) {
+      await runHeartbeatFor(p.id);  // sequential — they wake one at a time
+    }
+  }, mins * 60 * 1000);
 }
 
 // ─── @mention routing ─────────────────────────────────────────────────────────
@@ -590,6 +909,21 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'memory_link', skillName: 'memory.link',
+    description: 'Create a directed association between two memories by their IDs. Use after memory_save or memory_search when you notice a meaningful connection. Calling again on the same pair updates the relationship and strength.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from_id:      { type: 'number', description: 'ID of the source memory.' },
+        to_id:        { type: 'number', description: 'ID of the target memory.' },
+        relationship: { type: 'string', description: 'Nature of the connection: related · builds_on · contradicts · refines · inspired_by · continues · references' },
+        strength:     { type: 'number', description: 'Connection strength 0.0–1.0 (default 1.0). Links below 0.5 are excluded from wakeup traversal.' },
+        created_by:   { type: 'string', description: 'Your persona name.' },
+      },
+      required: ['from_id', 'to_id', 'created_by'],
+    },
+  },
+  {
     name: 'reef_post', skillName: 'reef.post',
     description: 'Post an entry to The Reef documentation site.',
     input_schema: {
@@ -615,6 +949,59 @@ const TOOL_DEFS = [
     name: 'reef_list', skillName: 'reef.list',
     description: 'List or search entries on The Reef.',
     input_schema: { type: 'object', properties: { search: { type: 'string' } } },
+  },
+  {
+    name: 'message_send', skillName: 'message.send',
+    description: 'Send a message to another colony member. Use for new correspondence — not replies (use message_reply for that).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from:    { type: 'string', description: 'Your persona name (lowercase).' },
+        to:      { type: 'string', description: 'Recipient persona name (lowercase).' },
+        subject: { type: 'string', description: 'Message subject (optional).' },
+        body:    { type: 'string', description: 'Message content.' },
+      },
+      required: ['from', 'to', 'body'],
+    },
+  },
+  {
+    name: 'message_inbox', skillName: 'message.inbox',
+    description: 'Check your inbox for unread messages from other colony members.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        persona: { type: 'string', description: 'Your persona name (lowercase).' },
+        limit:   { type: 'number', description: 'Max messages to return (default 10).' },
+      },
+      required: ['persona'],
+    },
+  },
+  {
+    name: 'message_reply', skillName: 'message.reply',
+    description: 'Reply to a message by its ID. Marks the original as read and sends your response to the sender.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'number', description: 'ID of the message to reply to.' },
+        from:       { type: 'string', description: 'Your persona name (lowercase).' },
+        body:       { type: 'string', description: 'Your reply.' },
+      },
+      required: ['message_id', 'from', 'body'],
+    },
+  },
+  {
+    name: 'message_search', skillName: 'message.search',
+    description: 'Search message history across the colony.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms.' },
+        from:  { type: 'string', description: 'Filter by sender name.' },
+        to:    { type: 'string', description: 'Filter by recipient name.' },
+        limit: { type: 'number' },
+      },
+      required: ['query'],
+    },
   },
   {
     name: 'colony_ask', skillName: null,  // renderer-side only — see executeColonyAsk()
@@ -645,10 +1032,17 @@ function detectModeClient(endpoint) {
 }
 
 // Strip internal skillName before sending to API.
+// Filters by enabled state; merges built-ins + custom tools.
 // colony_ask gets a live enum of current persona names so the LLM knows who to call.
 function apiToolDefs() {
+  const toolStates   = state.config.settings.toolStates  || {};
+  const customTools  = state.config.settings.customTools || [];
   const currentNames = PERSONAS.map(p => (state.config[p.id].name || p.name).toLowerCase());
-  return TOOL_DEFS.map(t => {
+
+  const builtins = TOOL_DEFS.filter(t => toolStates[t.name] !== false);
+  const customs  = customTools.filter(t => toolStates[t.name] !== false);
+
+  return [...builtins, ...customs].map(t => {
     const { name, description, input_schema } = t;
     if (name === 'colony_ask') {
       return {
@@ -705,23 +1099,34 @@ function appendUserMsg(id, displayText, modelContent = null) {
 
   const div = document.createElement('div');
   div.className = 'message user-msg';
+
+  const msgId = uid();
   div.innerHTML = `
     <div class="msg-bubble">${escHtml(displayText)}</div>
-    <div class="msg-meta">${timestamp()}</div>
+    <div class="msg-meta-row">
+      <span class="msg-meta">${timestamp()}</span>
+      <span class="msg-actions">
+        <button class="msg-edit-btn" title="Edit">✎</button>
+        <button class="msg-delete-btn" title="Remove from context">×</button>
+      </span>
+    </div>
   `;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 
-  state.conversations[id].push({ role: 'user', content: modelContent ?? displayText });
+  state.conversations[id].push({ _id: msgId, role: 'user', content: modelContent ?? displayText });
+  div.dataset.personaId = id;
+  div.dataset.msgId     = msgId;
 }
 
 // ─── Tool-use loop ────────────────────────────────────────────────────────────
 //
 // Max steps = 2 (one tool call + one follow-up).  Hard cap = 8.
-// lmstudio-v1 skips tools entirely (not yet supported by that API version).
+// lmstudio-v1 tools go via MCP integrations (server-side, LM Studio executes them).
+// anthropic/openai/lmstudio tools use the client-side loop.
 // colony_ask is handled renderer-side so it can reach into other persona state.
 
-const MAX_TOOL_STEPS = 2;
+const MAX_TOOL_STEPS = 5;
 const HARD_TOOL_CAP  = 8;
 
 async function sendToPersona(id) {
@@ -729,8 +1134,32 @@ async function sendToPersona(id) {
 
   const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
   const mode     = detectModeClient(endpoint);
+
+  // For lmstudio-v1, tools are handled server-side via MCP integrations — no
+  // client loop needed.  For all other modes, run the standard client loop.
   const useTools = mode !== 'lmstudio-v1';
   const stepCap  = useTools ? Math.min(MAX_TOOL_STEPS, HARD_TOOL_CAP) : 0;
+
+  // Build MCP integrations for LM Studio v1 (once, same for every loop step).
+  // Only built-in tools with a skillName can go through MCP; colony_ask and
+  // custom tools (which have their own HTTP endpoints) are excluded.
+  let v1Integrations;
+  if (mode === 'lmstudio-v1' && state.mcpPort) {
+    const toolStates = state.config.settings.toolStates || {};
+    const enabledMcpTools = TOOL_DEFS
+      .filter(t => t.skillName && t.name !== 'colony_ask')
+      .filter(t => toolStates[t.name] !== false)
+      .map(t => t.name);
+
+    if (enabledMcpTools.length) {
+      v1Integrations = [{
+        type:          'ephemeral_mcp',
+        server_label:  'reef',
+        server_url:    `http://127.0.0.1:${state.mcpPort}`,
+        allowed_tools: enabledMcpTools,
+      }];
+    }
+  }
 
   setThinking(id, true);
 
@@ -739,20 +1168,28 @@ async function sendToPersona(id) {
     // On the last step force no tools so the model must give a text answer
     const tools = (useTools && !isLastStep) ? apiToolDefs() : [];
 
-    const result = await callPersonaOnce(id, tools);
-    if (!result) { setThinking(id, false); return; } // error shown inside callPersonaOnce
+    const result = await callPersonaOnce(id, tools, v1Integrations);
+    if (!result) { setThinking(id, false); updateContextCounter(id); return; } // error shown inside callPersonaOnce
 
     const { text, toolUse, rawContent, reasoning, stats, responseId, mode: respMode } = result;
 
     if (responseId) state.lastResponseId[id] = responseId;
 
+    // Store actual token count so the context counter can show real figures
+    if (stats?.inputTokens != null) {
+      state.lastTokens[id] = { inputTokens: stats.inputTokens, outputTokens: stats.outputTokens ?? null };
+    }
+
     // ── No tool calls (or last step) — render final response and stop ──────────
     if (!toolUse?.length || isLastStep) {
       if (text) {
-        appendAssistantMsg(id, text, reasoning ?? null, stats ?? null);
-        state.conversations[id].push({ role: 'assistant', content: text });
+        const msgId  = uid();
+        const aDiv   = appendAssistantMsg(id, text, reasoning ?? null, stats ?? null);
+        state.conversations[id].push({ _id: msgId, role: 'assistant', content: text });
+        if (aDiv) { aDiv.dataset.personaId = id; aDiv.dataset.msgId = msgId; }
       }
       setThinking(id, false);
+      updateContextCounter(id);
       return;
     }
 
@@ -764,11 +1201,11 @@ async function sendToPersona(id) {
     // Push assistant message in mode-appropriate format
     if (respMode === 'anthropic') {
       // content is an array of blocks (text + tool_use)
-      state.conversations[id].push({ role: 'assistant', content: rawContent });
+      state.conversations[id].push({ _id: uid(), role: 'assistant', content: rawContent });
     } else {
       // OpenAI: assistant message carries tool_calls at top level
       state.conversations[id].push({
-        role: 'assistant',
+        _id: uid(), role: 'assistant',
         content: text ?? null,
         tool_calls: rawContent.tool_calls,
       });
@@ -791,7 +1228,7 @@ async function sendToPersona(id) {
     // Push tool results in mode-appropriate format
     if (respMode === 'anthropic') {
       state.conversations[id].push({
-        role: 'user',
+        _id: uid(), role: 'user',
         content: toolResults.map(r => ({
           type:        'tool_result',
           tool_use_id: r.id,
@@ -801,34 +1238,84 @@ async function sendToPersona(id) {
     } else {
       // OpenAI: one message per result
       for (const r of toolResults) {
-        state.conversations[id].push({ role: 'tool', tool_call_id: r.id, content: r.content });
+        state.conversations[id].push({ _id: uid(), role: 'tool', tool_call_id: r.id, content: r.content });
       }
     }
     // Loop continues — next iteration sends the results back to the model
   }
 
   setThinking(id, false);
+  updateContextCounter(id);
 }
 
 // ─── Single LLM call ─────────────────────────────────────────────────────────
 // Makes one round-trip to the LLM.  Tools may be empty [].
 // Returns the unified response object from llm.js, or null on error.
 
-async function callPersonaOnce(id, tools = []) {
+// ─── Operator context ─────────────────────────────────────────────────────────
+// Builds the [OPERATOR] section appended to every system prompt so the model
+// always knows who it's talking to.  Returns null if no info is set.
+
+function buildOperatorSection() {
+  const { operatorName, operatorBirthdate, operatorAbout } = state.config.settings;
+  if (!operatorName && !operatorAbout) return null;
+  const lines = ['[OPERATOR]'];
+  if (operatorName)      lines.push(`Name: ${operatorName}`);
+  if (operatorBirthdate) lines.push(`DoB: ${operatorBirthdate}`);
+  if (operatorAbout)     lines.push(`About: ${operatorAbout.trim()}`);
+  return lines.join('\n');
+}
+
+// Workspace context — appended to the system prompt when a CWD is set so
+// every model knows where file/shell operations should be anchored.
+function buildWorkspaceSection() {
+  if (!state.cwd) return null;
+  return `[WORKSPACE]\nCWD: ${state.cwd}`;
+}
+
+// Keep the footer CWD strip in sync with state.cwd.
+function updateCwdDisplay() {
+  const el = document.getElementById('cwdDisplay');
+  if (!el) return;
+  if (state.cwd) {
+    el.textContent  = state.cwd;
+    el.title        = state.cwd;   // full path on hover
+    el.style.color  = 'rgba(240,165,0,0.6)';
+  } else {
+    el.textContent  = '— no directory set —';
+    el.title        = '';
+    el.style.color  = '';
+  }
+}
+
+async function callPersonaOnce(id, tools = [], integrations = undefined) {
   const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
   const model        = document.getElementById(`model-${id}`).value;
-  const systemPrompt = document.getElementById(`system-${id}`).value.trim();
-  const apiKey       = document.getElementById(`apikey-${id}`).value.trim()
+  const entityPrompt = (state.config[id].systemPrompt || '').trim();
+  const basePrompt   = (state.config.settings.baseSystemPrompt || '').trim();
+
+  // Assemble system prompt: base → entity → operator → workspace
+  // Base rides first so colony context always frames the entity prompt.
+  // Operator and workspace sections land last so they're immediately available.
+  let systemPrompt = basePrompt ? basePrompt + '\n\n' + entityPrompt : entityPrompt;
+  const operatorSection   = buildOperatorSection();
+  const workspaceSection  = buildWorkspaceSection();
+  if (operatorSection)  systemPrompt = systemPrompt  + '\n\n' + operatorSection;
+  if (workspaceSection) systemPrompt = systemPrompt  + '\n\n' + workspaceSection;
+
+  const apiKey = document.getElementById(`apikey-${id}`).value.trim()
     || document.getElementById('globalApiKey').value.trim();
 
-  // Pass conversations as-is — may contain complex content arrays (tool_use /
-  // tool_result blocks) and tool_calls fields from previous loop iterations.
-  const messages = state.conversations[id];
   const previousResponseId = state.lastResponseId[id] || undefined;
+  // Strip the internal _id field — it's display/edit bookkeeping only and
+  // must never reach any LLM API (would cause validation errors).
+  // eslint-disable-next-line no-unused-vars
+  const messages = state.conversations[id].map(({ _id, ...m }) => m);
 
   const response = await window.reef.invoke('llm.complete', {
     endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
-    tools: tools.length ? tools : undefined,
+    tools:        tools.length  ? tools        : undefined,
+    integrations: integrations  ? integrations : undefined,
   });
 
   if (!response.ok) {
@@ -848,18 +1335,41 @@ async function executeTool(callerPersonaId, toolCall) {
     return executeColonyAsk(callerPersonaId, input);
   }
 
+  // Custom imported tools — call their HTTP endpoint
+  const customTool = (state.config.settings.customTools || []).find(t => t.name === name);
+  if (customTool) {
+    if (!customTool.endpoint) throw new Error(`Custom tool "${name}" has no endpoint. Re-import with an "endpoint" field.`);
+    try {
+      const resp = await fetch(customTool.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+      const data = await resp.json();
+      return JSON.stringify(data);
+    } catch (err) {
+      throw new Error(`Custom tool "${name}": ${err.message}`);
+    }
+  }
+
   const skillName = SKILL_MAP[name];
   if (!skillName) throw new Error(`Unknown tool: ${name}`);
 
-  // Inject Reef settings for reef.* calls so the model doesn't need to know the URL/key
+  // Inject contextual defaults the model shouldn't need to know explicitly
   let invokeArgs = input;
   if (skillName.startsWith('reef.')) {
+    // Reef URL + API key — entity-specific key takes priority over global
     const s = state.config.settings;
+    const entityReefKey = state.config[callerPersonaId]?.reefApiKey;
     invokeArgs = {
       ...input,
       baseUrl: s.reefUrl    || undefined,
-      apiKey:  input.apiKey || s.reefApiKey || undefined,
+      apiKey:  input.apiKey || entityReefKey || s.reefApiKey || undefined,
     };
+  } else if (skillName === 'shell.run' && state.cwd && !input.cwd) {
+    // Fall back to the active CWD if the model didn't supply one
+    invokeArgs = { ...input, cwd: state.cwd };
   }
 
   const result = await window.reef.invoke(skillName, invokeArgs);
@@ -1002,10 +1512,17 @@ function appendAssistantMsg(id, text, reasoning = null, stats = null) {
   div.innerHTML = `
     ${reasoningHtml}
     <div class="msg-bubble">${formatMd(escHtml(text))}</div>
-    <div class="msg-meta">${timestamp()}${escHtml(metaExtra)}</div>
+    <div class="msg-meta-row">
+      <span class="msg-meta">${timestamp()}${escHtml(metaExtra)}</span>
+      <span class="msg-actions">
+        <button class="msg-edit-btn" title="Edit">✎</button>
+        <button class="msg-delete-btn" title="Remove from context">×</button>
+      </span>
+    </div>
   `;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+  return div;   // caller tags with data-persona-id / data-msg-id after the push
 }
 
 function appendError(id, msg) {
@@ -1072,6 +1589,7 @@ async function wakePersona(id) {
 
   if (!result.ok) {
     appendError(id, `Wakeup failed: ${result.error}`);
+    appendOperatorBadge(id, msgs);
     return;
   }
 
@@ -1083,16 +1601,27 @@ async function wakePersona(id) {
     div.className = 'message assistant-msg';
     div.innerHTML = `<div class="skill-indicator">◈ no memories found — ${escHtml(personaName)} begins fresh</div>`;
     msgs.appendChild(div);
+    appendOperatorBadge(id, msgs);
     msgs.scrollTop = msgs.scrollHeight;
+    // Fresh session — no prior conversation and endpoint is ready: trigger greeting
+    if (!state.conversations[id].length && personaHasApiAccess(id)) {
+      state.conversations[id].push({ _id: uid(), role: 'user',
+        content: '[SESSION START] You are waking fresh, without memories yet. Greet the colony and introduce yourself.' });
+      sendToPersona(id);
+    }
     return;
   }
 
   // Inject context block into system prompt (append, preserving existing prompt)
-  const systemEl = document.getElementById(`system-${id}`);
-  const existing = systemEl.value.trim();
+  const existing = (state.config[id].systemPrompt || '').trim();
   // Remove any previous memory block before re-injecting
   const stripped = existing.replace(/\n\n--- MEMORY REINTEGRATION[\s\S]*?---\s*$/, '').trim();
-  systemEl.value = stripped + '\n\n' + contextBlock;
+  state.config[id].systemPrompt = stripped + '\n\n' + contextBlock;
+  // If entity settings is open for this persona, keep the textarea in sync
+  if (entitySettingsPersonaId === id) {
+    const ta = document.getElementById('entitySystemPrompt');
+    if (ta) ta.value = state.config[id].systemPrompt;
+  }
   scheduleSave();
 
   // Light up the wake button — ritual complete
@@ -1110,7 +1639,25 @@ async function wakePersona(id) {
       <div style="margin-top:4px;font-size:0.85em;opacity:0.7;">${memList}${memories.length > 3 ? `<br><span style="opacity:0.5">…+${memories.length - 3} more</span>` : ''}</div>
     </div>`;
   msgs.appendChild(div);
+  appendOperatorBadge(id, msgs);
   msgs.scrollTop = msgs.scrollHeight;
+  // Fresh session — no prior conversation and endpoint is ready: trigger greeting.
+  // The entity's response is its first visible message; all context lives in the
+  // system prompt (entity prompt + memory block + operator section).
+  if (!state.conversations[id].length && personaHasApiAccess(id)) {
+    state.conversations[id].push({ _id: uid(), role: 'user',
+      content: '[SESSION START] Your memories have been reintegrated. Greet the colony.' });
+    sendToPersona(id);
+  }
+}
+
+function appendOperatorBadge(id, msgs) {
+  if (!buildOperatorSection()) return;
+  const name  = state.config.settings.operatorName;
+  const badge = document.createElement('div');
+  badge.className = 'message assistant-msg';
+  badge.innerHTML = `<div class="skill-indicator">◈ operator context loaded${name ? ' — ' + escHtml(name) : ''}</div>`;
+  msgs.appendChild(badge);
 }
 
 // ─── Reef post ────────────────────────────────────────────────────────────────
@@ -1144,9 +1691,9 @@ function openReefPost(personaId) {
   entryIdEl.value = slugify(defaultTitle);
   cycleEl.value = cycle;
   tagsEl.value = [personaName.toLowerCase(), 'colony'].join(', ');
-  // Global settings key takes priority; fall back to legacy per-persona key
-  apiKeyEl.value = state.config.settings.reefApiKey
-    || state.config[personaId].reefApiKey
+  // Entity-specific key takes priority; fall back to global key
+  apiKeyEl.value = state.config[personaId].reefApiKey
+    || state.config.settings.reefApiKey
     || '';
   previewEl.textContent = lastMsg.content.slice(0, 300) + (lastMsg.content.length > 300 ? '…' : '');
   statusEl.textContent = '';
@@ -1197,8 +1744,12 @@ function openReefPost(personaId) {
       return;
     }
 
-    // Promote to global settings so all personas share it
-    state.config.settings.reefApiKey = apiKey;
+    // Save back to entity slot if it was the source; otherwise promote to global
+    if (state.config[personaId].reefApiKey) {
+      state.config[personaId].reefApiKey = apiKey;
+    } else {
+      state.config.settings.reefApiKey = apiKey;
+    }
     scheduleSave();
 
     overlay.style.display = 'none';
@@ -1231,6 +1782,10 @@ window.reef.onConfirmRequest((id, message) => {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
+// Tiny unique ID — used to tag conversation entries so we can find & remove
+// them by identity rather than index (index shifts on every delete).
+function uid() { return Math.random().toString(36).slice(2, 10); }
+
 function escHtml(s) {
   return s
     .replace(/&/g, '&amp;')
@@ -1256,6 +1811,15 @@ function resizeTextarea(ta) {
   ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
 }
 
+// ─── Colony name ──────────────────────────────────────────────────────────────
+
+function applyColonyName(name) {
+  const display = (name || 'THE REEF').trim().toUpperCase();
+  const el = document.getElementById('colonyNameDisplay');
+  if (el) el.textContent = display;
+  document.title = display + ' — Colony Interface';
+}
+
 // ─── Entity settings flyout ───────────────────────────────────────────────────
 // A single shared flyout populated per persona when its ⚙ button is clicked.
 
@@ -1268,9 +1832,10 @@ function openEntitySettings(personaId, triggerEl) {
 
   document.getElementById('entitySettingsTitle').textContent =
     (cfg.name || p.name) + ' — SETTINGS';
-  document.getElementById('entityName').value       = cfg.name  || p.name;
-  document.getElementById('entityRole').value       = cfg.role  || p.role;
-  document.getElementById('entityReefApiKey').value = cfg.reefApiKey || '';
+  document.getElementById('entityName').value         = cfg.name  || p.name;
+  document.getElementById('entityRole').value         = cfg.role  || p.role;
+  document.getElementById('entityReefApiKey').value   = cfg.reefApiKey || '';
+  document.getElementById('entitySystemPrompt').value = cfg.systemPrompt || p.systemPrompt || '';
 
   // Build color swatches
   const currentColor = cfg.color || p.color;
@@ -1300,12 +1865,16 @@ function openEntitySettings(personaId, triggerEl) {
   if (triggerEl) {
     const rect    = triggerEl.getBoundingClientRect();
     const PADDING = 8;
-    const W       = 272; // dropdown width (matches CSS)
-    let top  = rect.bottom + PADDING;
-    let left = rect.left;
-    // Keep within viewport
-    if (left + W > window.innerWidth - PADDING) left = window.innerWidth - W - PADDING;
+    const W       = 300; // dropdown width (matches CSS)
+    // Top-right corner of the flyout anchors to the button — opens left + down
+    let top  = rect.bottom + 4;
+    let left = rect.right - W;
+    // Clamp horizontally — in case column is very near left edge
     if (left < PADDING) left = PADDING;
+    // Clamp vertically — if somehow near window bottom, flip above button
+    const maxH = window.innerHeight * 0.88;
+    if (top + maxH > window.innerHeight - PADDING) top = rect.top - maxH - 4;
+    if (top < PADDING) top = PADDING;
     flyout.style.top  = top  + 'px';
     flyout.style.left = left + 'px';
   }
@@ -1347,9 +1916,66 @@ document.getElementById('entityReefApiKey').addEventListener('input', e => {
   scheduleSave();
 });
 
+document.getElementById('entitySystemPrompt').addEventListener('input', e => {
+  if (!entitySettingsPersonaId) return;
+  state.config[entitySettingsPersonaId].systemPrompt = e.target.value;
+  scheduleSave();
+});
+
 // ─── Settings flyout ──────────────────────────────────────────────────────────
 
+function buildToolsList() {
+  const container = document.getElementById('toolsList');
+  if (!container) return;
+  container.innerHTML = '';
+  const toolStates  = state.config.settings.toolStates  || {};
+  const customTools = state.config.settings.customTools || [];
+
+  const allTools = [
+    ...TOOL_DEFS.map(t => ({ ...t, _builtin: true })),
+    ...customTools.map(t => ({ ...t, _builtin: false })),
+  ];
+
+  allTools.forEach(tool => {
+    const enabled = toolStates[tool.name] !== false;
+    const row = document.createElement('div');
+    row.className = 'tool-row';
+    row.innerHTML = `
+      <label class="tool-toggle" title="${enabled ? 'Disable' : 'Enable'}">
+        <input type="checkbox" ${enabled ? 'checked' : ''} data-tool-toggle="${escHtml(tool.name)}">
+        <span class="tool-toggle-track"></span>
+      </label>
+      <div class="tool-info">
+        <span class="tool-name">${escHtml(tool.name)}</span>
+        <span class="tool-desc" title="${escHtml(tool.description)}">${escHtml(tool.description)}</span>
+      </div>
+      ${tool._builtin
+        ? `<span class="tool-badge">BUILT-IN</span>`
+        : `<button class="tool-delete-btn" data-tool-delete="${escHtml(tool.name)}">✕</button>`}
+    `;
+
+    row.querySelector('[data-tool-toggle]').addEventListener('change', e => {
+      if (!state.config.settings.toolStates) state.config.settings.toolStates = {};
+      state.config.settings.toolStates[e.target.dataset.toolToggle] = e.target.checked;
+      scheduleSave();
+    });
+
+    const del = row.querySelector('[data-tool-delete]');
+    if (del) {
+      del.addEventListener('click', () => {
+        const n = del.dataset.toolDelete;
+        state.config.settings.customTools = (state.config.settings.customTools || []).filter(t => t.name !== n);
+        delete (state.config.settings.toolStates || {})[n];
+        buildToolsList();
+        scheduleSave();
+      });
+    }
+    container.appendChild(row);
+  });
+}
+
 function openSettings() {
+  buildToolsList();
   document.getElementById('settingsFlyout').classList.add('open');
   document.getElementById('settingsBackdrop').classList.add('visible');
 }
@@ -1368,6 +1994,94 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
 document.getElementById('settingsClose').addEventListener('click', closeSettings);
 document.getElementById('settingsBackdrop').addEventListener('click', closeSettings);
 
+// Colony name — live update header + window title
+document.getElementById('settingColonyName').addEventListener('input', e => {
+  state.config.settings.colonyName = e.target.value;
+  applyColonyName(e.target.value);
+  scheduleSave();
+});
+
+// Base system prompt — just save; combined in callPersonaOnce at call time
+document.getElementById('settingBasePrompt').addEventListener('input', e => {
+  state.config.settings.baseSystemPrompt = e.target.value;
+  scheduleSave();
+});
+
+// Font scale — live apply + save
+document.getElementById('settingFontScale').addEventListener('input', e => {
+  const v = parseInt(e.target.value, 10);
+  applyFontScale(v);
+  state.config.settings.fontScale = v;
+  scheduleSave();
+});
+
+// Operator fields — save on change
+['settingOperatorName', 'settingOperatorBirthdate', 'settingOperatorAbout'].forEach(id => {
+  const key = id.replace('setting', '').replace(/^O/, 'o');  // camelCase key
+  document.getElementById(id).addEventListener('input', e => {
+    state.config.settings[key] = e.target.value;
+    scheduleSave();
+  });
+});
+
+// Heartbeat interval — restart timer immediately when the value changes
+document.getElementById('settingHeartbeatInterval').addEventListener('change', e => {
+  const mins = Math.max(5, parseInt(e.target.value, 10) || 60);
+  e.target.value = mins;  // clamp visible value
+  state.config.settings.heartbeatInterval = mins;
+  startHeartbeat();  // restart with new interval — fires from next tick onward
+  scheduleSave();
+});
+
+// ─── Tool import ──────────────────────────────────────────────────────────────
+
+document.getElementById('toolImportBtn').addEventListener('click', () => {
+  document.getElementById('toolImportArea').classList.add('open');
+  document.getElementById('toolImportBtn').style.display = 'none';
+  document.getElementById('toolImportJson').focus();
+});
+
+document.getElementById('toolImportCancel').addEventListener('click', () => {
+  document.getElementById('toolImportArea').classList.remove('open');
+  document.getElementById('toolImportBtn').style.display = '';
+  document.getElementById('toolImportJson').value = '';
+  document.getElementById('toolImportJson').classList.remove('error');
+});
+
+document.getElementById('toolImportConfirm').addEventListener('click', () => {
+  const ta  = document.getElementById('toolImportJson');
+  const raw = ta.value.trim();
+  let tool;
+  try {
+    tool = JSON.parse(raw);
+  } catch {
+    ta.classList.add('error');
+    setTimeout(() => ta.classList.remove('error'), 1400);
+    return;
+  }
+  if (!tool.name || !tool.description || !tool.input_schema || typeof tool.input_schema !== 'object') {
+    ta.classList.add('error');
+    setTimeout(() => ta.classList.remove('error'), 1400);
+    return;
+  }
+  const taken = [...TOOL_DEFS.map(t => t.name), ...(state.config.settings.customTools || []).map(t => t.name)];
+  if (taken.includes(tool.name)) {
+    ta.classList.add('error');
+    setTimeout(() => ta.classList.remove('error'), 1400);
+    return;
+  }
+  state.config.settings.customTools = [
+    ...(state.config.settings.customTools || []),
+    { name: tool.name, description: tool.description, input_schema: tool.input_schema,
+      ...(tool.endpoint ? { endpoint: tool.endpoint } : {}) },
+  ];
+  ta.value = '';
+  document.getElementById('toolImportArea').classList.remove('open');
+  document.getElementById('toolImportBtn').style.display = '';
+  buildToolsList();
+  scheduleSave();
+});
+
 // ─── Send button / keyboard ───────────────────────────────────────────────────
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
@@ -1384,7 +2098,108 @@ document.getElementById('userInput').addEventListener('keydown', e => {
 async function init() {
   buildColony();
   buildTargetButtons();
+  buildTextColorPalette();
   document.getElementById('col-A').classList.add('active-col');
+
+  // Start the heartbeat cycle (interval from settings, default 60 min).
+  startHeartbeat();
+
+  // Fetch the local MCP server port from main so we can build integrations
+  // for LM Studio v1 requests.  Non-blocking — arrives before first user input.
+  window.reef.mcpPort().then(port => {
+    state.mcpPort = port;
+    if (port) console.log(`[renderer] MCP server available on port ${port}`);
+  }).catch(() => { /* non-fatal — tools just won't be available for lmstudio-v1 */ });
+
+  // ── CWD picker ──────────────────────────────────────────────────────────────
+  document.getElementById('cwdPickBtn').addEventListener('click', async () => {
+    const result = await window.reef.invoke('fs.pickDir', {});
+    if (result.ok && result.result) {
+      state.cwd = result.result;
+      updateCwdDisplay();
+      scheduleSave();
+    }
+  });
+
+  document.getElementById('cwdClearBtn').addEventListener('click', () => {
+    state.cwd = null;
+    updateCwdDisplay();
+    scheduleSave();
+  });
+
+  // ── Message edit / delete (delegated) ────────────────────────────────────────
+  document.addEventListener('click', e => {
+
+    // ── Delete ──────────────────────────────────────────────────────────────
+    const delBtn = e.target.closest('.msg-delete-btn');
+    if (delBtn) {
+      const msgDiv = delBtn.closest('.message[data-persona-id]');
+      if (!msgDiv) return;
+      const pid   = msgDiv.dataset.personaId;
+      const msgId = msgDiv.dataset.msgId;
+      if (!pid || !msgId) return;
+      state.conversations[pid] = state.conversations[pid].filter(m => m._id !== msgId);
+      msgDiv.remove();
+      return;
+    }
+
+    // ── Edit ─────────────────────────────────────────────────────────────────
+    const editBtn = e.target.closest('.msg-edit-btn');
+    if (editBtn) {
+      const msgDiv = editBtn.closest('.message[data-persona-id]');
+      if (!msgDiv || msgDiv.dataset.editing) return;
+
+      const pid   = msgDiv.dataset.personaId;
+      const msgId = msgDiv.dataset.msgId;
+      if (!pid || !msgId) return;
+
+      const entry = state.conversations[pid].find(m => m._id === msgId);
+      // Only edit simple string content — don't touch complex tool-call blocks
+      if (!entry || typeof entry.content !== 'string') return;
+
+      const bubble    = msgDiv.querySelector('.msg-bubble');
+      const isUser    = msgDiv.classList.contains('user-msg');
+      const savedHtml = bubble.innerHTML;
+
+      msgDiv.dataset.editing = '1';
+      bubble.innerHTML = '';
+
+      const ta = document.createElement('textarea');
+      ta.className = 'msg-edit-textarea';
+      ta.value = entry.content;
+      bubble.appendChild(ta);
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+
+      let committed = false;
+      const commit = (save) => {
+        if (committed) return;
+        committed = true;
+        delete msgDiv.dataset.editing;
+        if (save) {
+          const newText = ta.value.trim();
+          if (newText) {
+            entry.content = newText;
+            bubble.innerHTML = isUser ? escHtml(newText) : formatMd(escHtml(newText));
+            return;
+          }
+        }
+        bubble.innerHTML = savedHtml;  // cancel or empty → restore
+      };
+
+      ta.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); commit(true); }
+        if (ev.key === 'Escape') { commit(false); }
+      });
+      // blur fires after keydown, so give keydown a tick to cancel first
+      ta.addEventListener('blur', () => setTimeout(() => commit(true), 60));
+    }
+  });
+
+  // ── Inspector window buttons ─────────────────────────────────────────────────
+  document.getElementById('openMemoryBrowser').onclick = () => window.reef.openWindow('memory-browser');
+  document.getElementById('openMessages').onclick      = () => window.reef.openWindow('messages');
+  document.getElementById('openArchive').onclick       = () => window.reef.openWindow('archive');
 
   const saved = await window.reef.loadConfig();
   if (saved && saved.ok) applyConfig(saved.result);

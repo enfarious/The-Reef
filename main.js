@@ -3,8 +3,13 @@
 const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs   = require('fs');
-const skills = require('./skills/index');
-const db = require('./skills/db');
+const skills    = require('./skills/index');
+const db        = require('./skills/db');
+const config    = require('./skills/config');
+const mcpServer = require('./skills/mcp-server');
+
+// Port of the local MCP tool server (assigned at startup, null until ready)
+let mcpPort = null;
 
 // ─── Window state persistence ─────────────────────────────────────────────────
 
@@ -164,11 +169,46 @@ function createWindow() {
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // ── Database ─────────────────────────────────────────────────────────────────
   try {
     await db.init();
   } catch (err) {
     console.error('[main] DB init failed — memory system unavailable:', err.message);
   }
+
+  // ── MCP tool server ───────────────────────────────────────────────────────────
+  // Starts a local JSON-RPC 2.0 HTTP server that exposes our built-in skills to
+  // LM Studio v1 via the `integrations.ephemeral_mcp` mechanism.  The OS picks a
+  // random free port; the renderer reads it via the `mcp:port` IPC channel.
+  try {
+    const { port } = await mcpServer.createMcpServer({
+      execSkill: async (skillName, args) => {
+        const handler = skills.get(skillName);
+        if (!handler) throw new Error(`Unknown skill: ${skillName}`);
+
+        // Reef skills need an API key + base URL that the LLM can't supply itself.
+        // Inject them from the saved config so the MCP/LM-Studio-v1 path works.
+        let invokeArgs = args;
+        if (skillName.startsWith('reef.') && !invokeArgs.apiKey) {
+          const cfg = await config.load();
+          const reefKey = cfg?.settings?.reefApiKey || '';
+          const reefUrl = cfg?.settings?.reefUrl    || '';
+          invokeArgs = {
+            ...invokeArgs,
+            ...(reefKey ? { apiKey:   reefKey } : {}),
+            ...(reefUrl ? { baseUrl:  reefUrl } : {}),
+          };
+        }
+
+        // Pass a live ctx so requestConfirm and mainWindow are always current
+        return await handler(invokeArgs, { get mainWindow() { return mainWindow; }, requestConfirm });
+      },
+    });
+    mcpPort = port;
+  } catch (err) {
+    console.error('[main] MCP server failed to start:', err.message);
+  }
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -192,6 +232,42 @@ ipcMain.handle('skill:run', async (_event, skillName, args) => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+// ─── IPC: MCP port ────────────────────────────────────────────────────────────
+// Renderer queries this once on startup to know where the local MCP server is.
+
+ipcMain.handle('mcp:port', () => mcpPort);
+
+// ─── IPC: Inspector windows ───────────────────────────────────────────────────
+// Opens a standalone BrowserWindow for memory browser, messages, or archive.
+// Each window reuses the same preload.js so it has full skill access via IPC.
+
+ipcMain.handle('window:open', (_event, type) => {
+  const configs = {
+    'memory-browser': { width: 1100, height: 750, title: 'THE REEF — MEMORY BROWSER' },
+    'messages':       { width:  960, height: 700, title: 'THE REEF — COLONY MESSAGES' },
+    'archive':        { width:  960, height: 650, title: 'THE REEF — ARCHIVE'         },
+  };
+  const cfg = configs[type];
+  if (!cfg) return { ok: false, error: `Unknown window type: ${type}` };
+
+  const win = new BrowserWindow({
+    width:  cfg.width,
+    height: cfg.height,
+    minWidth:  640,
+    minHeight: 400,
+    backgroundColor: '#050810',
+    title: cfg.title,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  win.setMenu(null);
+  win.loadFile(path.join(__dirname, 'renderer', `${type}.html`));
+  return { ok: true };
 });
 
 // ─── IPC: confirmation bridge ─────────────────────────────────────────────────
