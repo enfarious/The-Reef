@@ -149,7 +149,7 @@ async function wakeup(args) {
        FROM memories
        WHERE type = $1
        ${excludeClause}
-       ORDER BY created_at DESC
+       ORDER BY posted_to_reef DESC, created_at DESC
        LIMIT $${idxOffset}`,
       archivalParams
     );

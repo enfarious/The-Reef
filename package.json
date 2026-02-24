@@ -14,10 +14,10 @@
     "build:linux": "electron-builder --linux"
   },
   "dependencies": {
-    "electron": "^40.6.0",
     "pg": "^8.18.0"
   },
   "devDependencies": {
+    "electron": "^40.6.0",
     "electron-builder": "^26.8.1"
   },
   "build": {
@@ -41,7 +41,10 @@
       "main": "main.js"
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "zip",  "arch": ["x64"] }
+      ],
       "icon": "assets/icon.ico"
     },
     "nsis": {

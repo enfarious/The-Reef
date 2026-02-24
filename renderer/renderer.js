@@ -581,9 +581,10 @@ Once saved, reply with a brief confirmation.`;
 
 // Estimate token count from conversation content (~4 chars per token).
 function estimateTokens(id) {
+  // Include system prompt (base + entity + memory block) since the model sees all of it.
+  // This gives a better picture for APIs that don't return actual token counts (e.g. LM Studio v1).
+  let chars = (state.config[id]?.systemPrompt || '').length;
   const msgs = state.conversations[id];
-  if (!msgs.length) return 0;
-  let chars = 0;
   for (const m of msgs) {
     const c = m.content;
     if (typeof c === 'string') chars += c.length;
