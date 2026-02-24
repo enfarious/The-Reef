@@ -228,6 +228,13 @@ ipcMain.handle('skill:run', async (_event, skillName, args) => {
   }
   try {
     const result = await handler(args, { mainWindow, requestConfirm });
+    // After a successful config save, broadcast the new config to all windows
+    // so each can apply any side-effects (font scale, colony name, heartbeat, etc.)
+    if (skillName === 'config.save') {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) win.webContents.send('config:updated', args);
+      });
+    }
     return { ok: true, result };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -248,6 +255,7 @@ ipcMain.handle('window:open', (_event, type) => {
     'memory-browser': { width: 1100, height: 750, title: 'THE REEF — MEMORY BROWSER' },
     'messages':       { width:  960, height: 700, title: 'THE REEF — COLONY MESSAGES' },
     'archive':        { width:  960, height: 650, title: 'THE REEF — ARCHIVE'         },
+    'settings':       { width:  820, height: 640, title: 'THE REEF — SETTINGS'        },
   };
   const cfg = configs[type];
   if (!cfg) return { ok: false, error: `Unknown window type: ${type}` };

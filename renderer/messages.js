@@ -20,16 +20,38 @@ function fmtDate(iso) {
   });
 }
 
+// Split a stored to_persona value into an array of individual names.
+// "all" → ['all'], "dreamer,builder" → ['dreamer','builder'], "dreamer" → ['dreamer']
+function toPersonaList(to_persona) {
+  if (!to_persona) return [];
+  if (to_persona === 'all') return ['all'];
+  return to_persona.split(',').map(s => s.trim()).filter(Boolean);
+}
+
 function applyFilters(messages) {
   const persona = document.getElementById('filterPersona').value;
   const readFilter = document.getElementById('filterRead').value;
 
   return messages.filter(m => {
-    if (persona && m.from_persona !== persona && m.to_persona !== persona) return false;
+    if (persona) {
+      const toList = toPersonaList(m.to_persona);
+      const toMatch = toList.includes('all') || toList.includes(persona);
+      if (m.from_persona !== persona && !toMatch) return false;
+    }
     if (readFilter === 'unread' && m.is_read) return false;
     if (readFilter === 'read'   && !m.is_read) return false;
     return true;
   });
+}
+
+// Format the to_persona value for display.
+function fmtRecipient(to_persona) {
+  if (!to_persona) return '—';
+  if (to_persona === 'all') return '<span class="msg-to-all">ALL</span>';
+  if (to_persona.includes(',')) {
+    return to_persona.split(',').map(s => esc(s.trim())).join('<span style="opacity:0.4">, </span>');
+  }
+  return esc(to_persona);
 }
 
 function renderCards(messages) {
@@ -50,7 +72,7 @@ function renderCards(messages) {
       <div class="msg-route">
         <strong>${esc(m.from_persona)}</strong>
         <span style="opacity:0.5"> → </span>
-        <strong>${esc(m.to_persona)}</strong>
+        <strong>${fmtRecipient(m.to_persona)}</strong>
         ${m.reply_to_id ? `<span style="opacity:0.4"> (reply to #${m.reply_to_id})</span>` : ''}
         <span class="card-date">${fmtDate(m.created_at)}</span>
       </div>
@@ -83,12 +105,13 @@ async function load() {
     if (document.getElementById('filterPersona').options.length === 1) {
       const personas = [...new Set([
         ...allMessages.map(m => m.from_persona),
-        ...allMessages.map(m => m.to_persona),
-      ])].sort();
+        // Expand comma-separated to_persona; skip the broadcast sentinel "all"
+        ...allMessages.flatMap(m => toPersonaList(m.to_persona).filter(p => p !== 'all')),
+      ])].filter(Boolean).sort();
       const sel = document.getElementById('filterPersona');
       personas.forEach(p => {
         const opt = document.createElement('option');
-        opt.value = p; opt.textContent = p;
+        opt.value = p; opt.textContent = p.toUpperCase();
         sel.appendChild(opt);
       });
     }

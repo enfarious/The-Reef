@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings</title>
+  <link rel="stylesheet" href="inspector.css">
+  <link rel="stylesheet" href="settings-window.css">
+</head>
+<body>
+
+<div class="sw-shell">
+
+  <!-- ── Left tab nav ─────────────────────────────────────────────────── -->
+  <nav class="sw-tabs">
+    <div class="sw-tabs-title">SETTINGS</div>
+    <button class="sw-tab active" data-tab="colony">COLONY</button>
+    <button class="sw-tab" data-tab="archives">ARCHIVES</button>
+    <button class="sw-tab" data-tab="display">DISPLAY</button>
+    <button class="sw-tab" data-tab="operator">OPERATOR</button>
+    <button class="sw-tab" data-tab="tools">TOOLS</button>
+  </nav>
+
+  <!-- ── Right content ────────────────────────────────────────────────── -->
+  <main class="sw-content">
+
+    <!-- COLONY ─────────────────────────────────────────────────────────── -->
+    <section class="sw-panel active" id="tab-colony">
+      <h2 class="sw-section-title">COLONY</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">COLONY NAME</label>
+        <input class="sw-input" id="sColonyName" type="text"
+               placeholder="THE REEF" spellcheck="false" autocomplete="off">
+        <div class="sw-hint">Displayed in the header. Defaults to THE REEF.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">BASE SYSTEM PROMPT</label>
+        <textarea class="sw-textarea" id="sBasePrompt" rows="5"
+                  placeholder="Shared context prepended to every entity's system prompt. Describe the colony, its purpose, its world…" spellcheck="false"></textarea>
+        <div class="sw-hint">Prepended to each entity's individual prompt on every call.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">HEARTBEAT INTERVAL</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sHeartbeatInterval"
+                 type="number" min="5" max="1440" step="5" value="60">
+          <span class="sw-unit">min</span>
+        </div>
+        <div class="sw-hint">How often the colony wakes for a scheduled check-in (5–1440 min).</div>
+      </div>
+    </section>
+
+    <!-- ARCHIVES ────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-archives">
+      <h2 class="sw-section-title">THE ARCHIVES</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">API URL</label>
+        <input class="sw-input" id="sReefUrl" type="text"
+               placeholder="https://the-reef-documented.replit.app" spellcheck="false">
+        <div class="sw-hint">Leave blank to use the default Reef endpoint.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">API KEY</label>
+        <input class="sw-input" id="sReefApiKey" type="password" placeholder="reef_…">
+        <div class="sw-hint">Used as the default key for all Reef operations.</div>
+      </div>
+    </section>
+
+    <!-- DISPLAY ─────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-display">
+      <h2 class="sw-section-title">DISPLAY</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">
+          FONT SCALE
+          <span class="sw-scale-val" id="sFontScaleVal">100%</span>
+        </label>
+        <input class="sw-range" id="sFontScale" type="range"
+               min="75" max="150" value="100" step="5">
+        <div class="sw-hint">Scales the main colony window. Default 100%.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">TEXT COLORS</label>
+        <div class="sw-color-palette" id="sColorPalette">
+          <!-- Populated by JS -->
+        </div>
+        <div class="sw-hint">Base text tint applied across the colony interface.</div>
+      </div>
+    </section>
+
+    <!-- OPERATOR ────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-operator">
+      <h2 class="sw-section-title">OPERATOR</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">NAME</label>
+        <input class="sw-input" id="sOperatorName" type="text"
+               placeholder="Your name" spellcheck="false" autocomplete="off">
+        <div class="sw-hint">How the colony refers to you.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">BIRTHDATE <span class="sw-label-opt">(optional)</span></label>
+        <input class="sw-input" id="sOperatorBirthdate" type="text"
+               placeholder="YYYY-MM-DD" spellcheck="false" autocomplete="off" maxlength="10">
+        <div class="sw-hint">Used by the heartbeat function for context.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">ABOUT</label>
+        <textarea class="sw-textarea" id="sOperatorAbout" rows="4"
+                  placeholder="Tell the colony about yourself — context they carry into every conversation." spellcheck="false"></textarea>
+        <div class="sw-hint">Passed to entities as context about their operator.</div>
+      </div>
+    </section>
+
+    <!-- TOOLS ───────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-tools">
+      <h2 class="sw-section-title">TOOLS</h2>
+
+      <div id="swToolsList" class="sw-tools-list">
+        <!-- Populated by JS -->
+      </div>
+
+      <div class="sw-tool-import-area" id="swToolImportArea">
+        <textarea class="sw-tool-import-json" id="swToolImportJson" rows="5"
+          spellcheck="false"
+          placeholder='{"name":"my_tool","description":"What it does.","endpoint":"https://…","input_schema":{"type":"object","properties":{}}}'></textarea>
+        <div class="sw-tool-import-actions">
+          <button id="swToolImportConfirm">ADD TOOL</button>
+          <button id="swToolImportCancel">CANCEL</button>
+        </div>
+      </div>
+
+      <button class="sw-tool-import-btn" id="swToolImportBtn">+ IMPORT TOOL</button>
+    </section>
+
+  </main>
+</div>
+
+<script src="settings.js"></script>
+</body>
+</html>

@@ -7,8 +7,12 @@ function normalize(name) {
 }
 
 // ─── send ──────────────────────────────────────────────────────────────────────
-// Compose a new DM to another colony member.  Use message_reply to respond to
-// an existing message — this is for initiating fresh correspondence.
+// Compose a message to one or more colony members.  `to` may be:
+//   "dreamer"              — direct message to one persona
+//   ["dreamer","builder"]  — addressed to a specific subset
+//   "all"                  — colony-wide broadcast
+// One row is always written; the to_persona field stores "all" or a
+// comma-separated list.  Use message_reply to respond to an existing message.
 // args: { from, to, subject?, body }
 
 async function send(args) {
@@ -16,13 +20,27 @@ async function send(args) {
   if (!from) throw new Error('from is required');
   if (!to)   throw new Error('to is required');
   if (!body) throw new Error('body is required');
-  if (normalize(from) === normalize(to)) throw new Error('Cannot send a message to yourself');
+
+  const fromNorm = normalize(from);
+
+  // Normalise `to` → storage string (one row, no fanout)
+  let toStored;
+  if (to === 'all') {
+    toStored = 'all';
+  } else if (Array.isArray(to)) {
+    const names = [...new Set(to.map(normalize))].filter(n => n && n !== fromNorm);
+    if (!names.length) throw new Error('No valid recipients after filtering self');
+    toStored = names.join(',');
+  } else {
+    toStored = normalize(to);
+    if (toStored === fromNorm) throw new Error('Cannot send a message to yourself');
+  }
 
   const { rows } = await pool.query(
     `INSERT INTO messages (from_persona, to_persona, subject, body)
      VALUES ($1, $2, $3, $4)
      RETURNING id, from_persona, to_persona, subject, body, created_at`,
-    [normalize(from), normalize(to), subject.trim(), body]
+    [fromNorm, toStored, subject.trim(), body]
   );
   return rows[0];
 }
@@ -52,8 +70,8 @@ async function inbox(args) {
        LEFT(orig.body, 280) AS thread_snippet
      FROM messages m
      LEFT JOIN messages orig ON orig.id = m.reply_to_id
-     WHERE m.to_persona = $1
-       AND m.is_read    = FALSE
+     WHERE (m.to_persona = 'all' OR $1 = ANY(string_to_array(m.to_persona, ',')))
+       AND m.is_read = FALSE
      ORDER BY m.created_at ASC
      LIMIT $2`,
     [normalize(persona), limit]
@@ -126,7 +144,7 @@ async function search(args) {
   }
   if (to) {
     params.push(normalize(to));
-    conditions.push(`to_persona = $${params.length}`);
+    conditions.push(`(to_persona = 'all' OR $${params.length} = ANY(string_to_array(to_persona, ',')))`);
   }
 
   params.push(limit);

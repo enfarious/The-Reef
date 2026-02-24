@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('reef', {
   // Opens a separate BrowserWindow for memory browser, messages, or archive.
   openWindow: (type) => ipcRenderer.invoke('window:open', type),
 
+  // ─── Config change broadcast (main → all windows) ─────────────────────────
+  // Fired after any window saves config so other windows can apply side-effects.
+  onConfigUpdated: (cb) => {
+    ipcRenderer.on('config:updated', (_event, cfg) => cb(cfg));
+  },
+
   // ─── Confirmation bridge (main → renderer → main) ──────────────────────────
   // Renderer registers a handler; main sends 'confirm:request' events.
   onConfirmRequest: (cb) => {

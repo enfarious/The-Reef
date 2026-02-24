@@ -180,9 +180,8 @@ const TEXT_COLOR_PRESETS = [
 function applyFontScale(v) {
   const scale = v / 100;
   const app   = document.getElementById('app');
-  // Use transform: scale so fixed-positioned flyouts/modals (outside #app in the
-  // DOM) are unaffected. Compensate width/height so #app still visually fills
-  // 100vw × 100vh after the scale — keeps the footer pinned to the bottom.
+  // Use transform: scale so fixed-positioned elements are unaffected.
+  // Compensate width/height so #app still fills 100vw × 100vh after scaling.
   if (scale === 1) {
     app.style.transform       = '';
     app.style.transformOrigin = '';
@@ -196,10 +195,6 @@ function applyFontScale(v) {
     app.style.height          = `${inv}vh`;
   }
   document.body.style.zoom = '';   // clear any legacy body zoom
-  const el = document.getElementById('fontScaleVal');
-  if (el) el.textContent = v + '%';
-  const slider = document.getElementById('settingFontScale');
-  if (slider) slider.value = v;
 }
 
 function applyTextColors(presetId) {
@@ -209,33 +204,8 @@ function applyTextColors(presetId) {
   root.style.setProperty('--text-mid',    preset.mid);
   root.style.setProperty('--text-dim',    preset.dim);
   state.config.settings.fontColors = preset.id;
-  // Reflect active state in palette
-  document.querySelectorAll('.text-color-swatch').forEach(sw => {
-    sw.classList.toggle('active', sw.dataset.colorId === preset.id);
-  });
 }
 
-function buildTextColorPalette() {
-  const palette = document.getElementById('textColorPalette');
-  if (!palette) return;
-  palette.innerHTML = '';
-  TEXT_COLOR_PRESETS.forEach(preset => {
-    const btn = document.createElement('button');
-    btn.className = 'text-color-swatch';
-    btn.dataset.colorId = preset.id;
-    const currentId = state.config.settings.fontColors || 'cool';
-    if (preset.id === currentId) btn.classList.add('active');
-    btn.innerHTML = `
-      <span class="text-color-swatch-preview" style="color:${preset.bright}">${preset.preview}</span>
-      <span class="text-color-swatch-label">${preset.label}</span>
-    `;
-    btn.addEventListener('click', () => {
-      applyTextColors(preset.id);
-      scheduleSave();
-    });
-    palette.appendChild(btn);
-  });
-}
 
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
@@ -389,21 +359,9 @@ function collectConfig() {
     };
   });
   cfg.global.apiKey = document.getElementById('globalApiKey').value;
-  cfg.settings = {
-    reefUrl:            document.getElementById('settingReefUrl').value,
-    reefApiKey:         document.getElementById('settingReefApiKey').value,
-    colonyName:         document.getElementById('settingColonyName').value,
-    baseSystemPrompt:   document.getElementById('settingBasePrompt').value,
-    fontScale:          parseInt(document.getElementById('settingFontScale').value, 10) || 100,
-    fontColors:         state.config.settings.fontColors || 'cool',
-    operatorName:       document.getElementById('settingOperatorName').value,
-    operatorBirthdate:  document.getElementById('settingOperatorBirthdate').value,
-    operatorAbout:      document.getElementById('settingOperatorAbout').value,
-    heartbeatInterval:  parseInt(document.getElementById('settingHeartbeatInterval').value, 10) || 60,
-    toolStates:         state.config.settings.toolStates  || {},
-    customTools:        state.config.settings.customTools || [],
-    cwd:                state.cwd || null,
-  };
+  // Settings are owned by the settings window; snapshot state here.
+  // cwd is tracked in renderer state so we inject it at save time.
+  cfg.settings = { ...state.config.settings, cwd: state.cwd || null };
   return cfg;
 }
 
@@ -422,23 +380,17 @@ function applyConfig(cfg) {
     if (cfg.global.apiKey) document.getElementById('globalApiKey').value = cfg.global.apiKey;
   }
   if (cfg.settings) {
-    if (cfg.settings.reefUrl          !== undefined) document.getElementById('settingReefUrl').value          = cfg.settings.reefUrl;
-    if (cfg.settings.reefApiKey       !== undefined) document.getElementById('settingReefApiKey').value       = cfg.settings.reefApiKey;
-    if (cfg.settings.colonyName       !== undefined) document.getElementById('settingColonyName').value       = cfg.settings.colonyName;
-    if (cfg.settings.baseSystemPrompt !== undefined) document.getElementById('settingBasePrompt').value       = cfg.settings.baseSystemPrompt;
-    if (cfg.settings.fontScale        !== undefined) applyFontScale(cfg.settings.fontScale);
-    if (cfg.settings.fontColors       !== undefined) applyTextColors(cfg.settings.fontColors);
-    if (cfg.settings.operatorName      !== undefined) document.getElementById('settingOperatorName').value         = cfg.settings.operatorName;
-    if (cfg.settings.operatorBirthdate !== undefined) document.getElementById('settingOperatorBirthdate').value    = cfg.settings.operatorBirthdate;
-    if (cfg.settings.operatorAbout     !== undefined) document.getElementById('settingOperatorAbout').value        = cfg.settings.operatorAbout;
-    if (cfg.settings.heartbeatInterval !== undefined) document.getElementById('settingHeartbeatInterval').value   = cfg.settings.heartbeatInterval;
+    // Merge settings into state — the settings window owns the DOM fields
     state.config.settings = { ...state.config.settings, ...cfg.settings };
+    // Apply visual/behavioural side-effects
+    if (cfg.settings.fontScale  !== undefined) applyFontScale(cfg.settings.fontScale);
+    if (cfg.settings.fontColors !== undefined) applyTextColors(cfg.settings.fontColors);
+    applyColonyName(state.config.settings.colonyName);
     // Restore CWD from saved config
     if (cfg.settings.cwd) {
       state.cwd = cfg.settings.cwd;
       updateCwdDisplay();
     }
-    applyColonyName(state.config.settings.colonyName);
   }
   PERSONAS.forEach(p => {
     const pc = cfg[p.id];
@@ -472,9 +424,7 @@ document.addEventListener('input', e => {
   if (
     e.target.matches('.endpoint-input') ||
     e.target.matches('.api-key-input') ||
-    e.target.matches('#globalApiKey')   ||
-    e.target.matches('.settings-input') ||
-    e.target.matches('.settings-textarea')
+    e.target.matches('#globalApiKey')
   ) {
     scheduleSave();
   }
@@ -957,7 +907,10 @@ const TOOL_DEFS = [
       type: 'object',
       properties: {
         from:    { type: 'string', description: 'Your persona name (lowercase).' },
-        to:      { type: 'string', description: 'Recipient persona name (lowercase).' },
+        to: {
+          anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description: 'Recipient: a persona name, an array of names e.g. ["dreamer","builder"], or "all" for a colony-wide broadcast. One message row is stored regardless of recipient count.',
+        },
         subject: { type: 'string', description: 'Message subject (optional).' },
         body:    { type: 'string', description: 'Message content.' },
       },
@@ -1922,164 +1875,33 @@ document.getElementById('entitySystemPrompt').addEventListener('input', e => {
   scheduleSave();
 });
 
-// ─── Settings flyout ──────────────────────────────────────────────────────────
-
-function buildToolsList() {
-  const container = document.getElementById('toolsList');
-  if (!container) return;
-  container.innerHTML = '';
-  const toolStates  = state.config.settings.toolStates  || {};
-  const customTools = state.config.settings.customTools || [];
-
-  const allTools = [
-    ...TOOL_DEFS.map(t => ({ ...t, _builtin: true })),
-    ...customTools.map(t => ({ ...t, _builtin: false })),
-  ];
-
-  allTools.forEach(tool => {
-    const enabled = toolStates[tool.name] !== false;
-    const row = document.createElement('div');
-    row.className = 'tool-row';
-    row.innerHTML = `
-      <label class="tool-toggle" title="${enabled ? 'Disable' : 'Enable'}">
-        <input type="checkbox" ${enabled ? 'checked' : ''} data-tool-toggle="${escHtml(tool.name)}">
-        <span class="tool-toggle-track"></span>
-      </label>
-      <div class="tool-info">
-        <span class="tool-name">${escHtml(tool.name)}</span>
-        <span class="tool-desc" title="${escHtml(tool.description)}">${escHtml(tool.description)}</span>
-      </div>
-      ${tool._builtin
-        ? `<span class="tool-badge">BUILT-IN</span>`
-        : `<button class="tool-delete-btn" data-tool-delete="${escHtml(tool.name)}">✕</button>`}
-    `;
-
-    row.querySelector('[data-tool-toggle]').addEventListener('change', e => {
-      if (!state.config.settings.toolStates) state.config.settings.toolStates = {};
-      state.config.settings.toolStates[e.target.dataset.toolToggle] = e.target.checked;
-      scheduleSave();
-    });
-
-    const del = row.querySelector('[data-tool-delete]');
-    if (del) {
-      del.addEventListener('click', () => {
-        const n = del.dataset.toolDelete;
-        state.config.settings.customTools = (state.config.settings.customTools || []).filter(t => t.name !== n);
-        delete (state.config.settings.toolStates || {})[n];
-        buildToolsList();
-        scheduleSave();
-      });
-    }
-    container.appendChild(row);
-  });
-}
-
-function openSettings() {
-  buildToolsList();
-  document.getElementById('settingsFlyout').classList.add('open');
-  document.getElementById('settingsBackdrop').classList.add('visible');
-}
-
-function closeSettings() {
-  document.getElementById('settingsFlyout').classList.remove('open');
-  document.getElementById('settingsBackdrop').classList.remove('visible');
-}
+// ─── Settings window ──────────────────────────────────────────────────────────
+// Settings now live in a separate BrowserWindow (renderer/settings.html).
+// The ⚙ button opens it; the config:updated broadcast keeps state in sync.
 
 document.getElementById('settingsBtn').addEventListener('click', () => {
-  document.getElementById('settingsFlyout').classList.contains('open')
-    ? closeSettings()
-    : openSettings();
+  window.reef.openWindow('settings');
 });
 
-document.getElementById('settingsClose').addEventListener('click', closeSettings);
-document.getElementById('settingsBackdrop').addEventListener('click', closeSettings);
-
-// Colony name — live update header + window title
-document.getElementById('settingColonyName').addEventListener('input', e => {
-  state.config.settings.colonyName = e.target.value;
-  applyColonyName(e.target.value);
-  scheduleSave();
-});
-
-// Base system prompt — just save; combined in callPersonaOnce at call time
-document.getElementById('settingBasePrompt').addEventListener('input', e => {
-  state.config.settings.baseSystemPrompt = e.target.value;
-  scheduleSave();
-});
-
-// Font scale — live apply + save
-document.getElementById('settingFontScale').addEventListener('input', e => {
-  const v = parseInt(e.target.value, 10);
-  applyFontScale(v);
-  state.config.settings.fontScale = v;
-  scheduleSave();
-});
-
-// Operator fields — save on change
-['settingOperatorName', 'settingOperatorBirthdate', 'settingOperatorAbout'].forEach(id => {
-  const key = id.replace('setting', '').replace(/^O/, 'o');  // camelCase key
-  document.getElementById(id).addEventListener('input', e => {
-    state.config.settings[key] = e.target.value;
-    scheduleSave();
-  });
-});
-
-// Heartbeat interval — restart timer immediately when the value changes
-document.getElementById('settingHeartbeatInterval').addEventListener('change', e => {
-  const mins = Math.max(5, parseInt(e.target.value, 10) || 60);
-  e.target.value = mins;  // clamp visible value
-  state.config.settings.heartbeatInterval = mins;
-  startHeartbeat();  // restart with new interval — fires from next tick onward
-  scheduleSave();
-});
-
-// ─── Tool import ──────────────────────────────────────────────────────────────
-
-document.getElementById('toolImportBtn').addEventListener('click', () => {
-  document.getElementById('toolImportArea').classList.add('open');
-  document.getElementById('toolImportBtn').style.display = 'none';
-  document.getElementById('toolImportJson').focus();
-});
-
-document.getElementById('toolImportCancel').addEventListener('click', () => {
-  document.getElementById('toolImportArea').classList.remove('open');
-  document.getElementById('toolImportBtn').style.display = '';
-  document.getElementById('toolImportJson').value = '';
-  document.getElementById('toolImportJson').classList.remove('error');
-});
-
-document.getElementById('toolImportConfirm').addEventListener('click', () => {
-  const ta  = document.getElementById('toolImportJson');
-  const raw = ta.value.trim();
-  let tool;
-  try {
-    tool = JSON.parse(raw);
-  } catch {
-    ta.classList.add('error');
-    setTimeout(() => ta.classList.remove('error'), 1400);
-    return;
+// When any window saves config, apply side-effects here (font, colony name,
+// heartbeat interval, CWD).  The full cfg is broadcast by main.js.
+window.reef.onConfigUpdated(cfg => {
+  if (!cfg?.settings) return;
+  const prev = state.config.settings.heartbeatInterval;
+  state.config.settings = { ...state.config.settings, ...cfg.settings };
+  if (cfg.settings.fontScale  !== undefined) applyFontScale(cfg.settings.fontScale);
+  if (cfg.settings.fontColors !== undefined) applyTextColors(cfg.settings.fontColors);
+  applyColonyName(state.config.settings.colonyName);
+  // Restart heartbeat if the interval changed
+  if (cfg.settings.heartbeatInterval !== undefined &&
+      cfg.settings.heartbeatInterval !== prev) {
+    startHeartbeat();
   }
-  if (!tool.name || !tool.description || !tool.input_schema || typeof tool.input_schema !== 'object') {
-    ta.classList.add('error');
-    setTimeout(() => ta.classList.remove('error'), 1400);
-    return;
+  // Sync CWD if settings window changed it
+  if (cfg.settings.cwd !== undefined) {
+    state.cwd = cfg.settings.cwd || null;
+    updateCwdDisplay();
   }
-  const taken = [...TOOL_DEFS.map(t => t.name), ...(state.config.settings.customTools || []).map(t => t.name)];
-  if (taken.includes(tool.name)) {
-    ta.classList.add('error');
-    setTimeout(() => ta.classList.remove('error'), 1400);
-    return;
-  }
-  state.config.settings.customTools = [
-    ...(state.config.settings.customTools || []),
-    { name: tool.name, description: tool.description, input_schema: tool.input_schema,
-      ...(tool.endpoint ? { endpoint: tool.endpoint } : {}) },
-  ];
-  ta.value = '';
-  document.getElementById('toolImportArea').classList.remove('open');
-  document.getElementById('toolImportBtn').style.display = '';
-  buildToolsList();
-  scheduleSave();
 });
 
 // ─── Send button / keyboard ───────────────────────────────────────────────────
@@ -2098,7 +1920,6 @@ document.getElementById('userInput').addEventListener('keydown', e => {
 async function init() {
   buildColony();
   buildTargetButtons();
-  buildTextColorPalette();
   document.getElementById('col-A').classList.add('active-col');
 
   // Start the heartbeat cycle (interval from settings, default 60 min).

@@ -228,6 +228,12 @@ html, body {
   margin-bottom: 4px;
 }
 .msg-route strong { color: var(--text); }
+/* Broadcast recipient badge */
+.msg-to-all {
+  color: var(--accent);
+  opacity: 0.8;
+  letter-spacing: 0.06em;
+}
 .msg-subject-line {
   font-size: 0.88rem;
   font-weight: 400;
