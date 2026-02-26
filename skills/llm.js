@@ -138,6 +138,408 @@ function httpRequest(url, method, headers, body) {
 const fetchJson    = (url, headers, body) => httpRequest(url, 'POST', headers, body);
 const fetchJsonGet = (url, headers)       => httpRequest(url, 'GET',  headers, null);
 
+// ─── SSE streaming helper ─────────────────────────────────────────────────────
+// Sends a POST request and delivers Server-Sent Events to callbacks.
+// onEvent(eventType, parsedData) — called for each SSE data line
+// onEnd()   — called when the stream closes cleanly
+// onError(err) — called on network/HTTP errors
+// Returns the raw http.ClientRequest so the caller can abort if needed.
+
+function httpStream(url, headers, body, { onEvent, onEnd, onError }) {
+  const parsed  = new URL(url);
+  const lib     = parsed.protocol === 'https:' ? https : http;
+  const payload = JSON.stringify(body);
+
+  const opts = {
+    hostname: parsed.hostname,
+    port:     parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+    path:     parsed.pathname + parsed.search,
+    method:   'POST',
+    headers: {
+      ...headers,
+      'Content-Type':   'application/json',
+      'Accept':         'text/event-stream',
+      'Cache-Control':  'no-cache',
+      'Content-Length': Buffer.byteLength(payload),
+    },
+  };
+
+  let finished = false;
+
+  const req = lib.request(opts, (res) => {
+    if (res.statusCode >= 400) {
+      let errBody = '';
+      res.on('data', c => { errBody += c; });
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(errBody);
+          onError(new Error(j.error?.message || j.message || `HTTP ${res.statusCode}`));
+        } catch {
+          onError(new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 200)}`));
+        }
+      });
+      return;
+    }
+
+    let buf       = '';
+    let eventType = '';
+
+    res.on('data', chunk => {
+      buf += chunk.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';   // last incomplete line back to buffer
+
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          const text = line.slice(5).trim();
+          if (text === '[DONE]') {
+            if (!finished) { finished = true; onEnd(); }
+            return;
+          }
+          try { onEvent(eventType || 'data', JSON.parse(text)); } catch { /* ignore malformed */ }
+          eventType = '';
+        } else if (line === '') {
+          eventType = '';   // blank line resets event type
+        }
+      }
+    });
+
+    res.on('end', () => { if (!finished) { finished = true; onEnd(); } });
+  });
+
+  req.on('error', (err) => { if (!finished) { finished = true; onError(err); } });
+  req.write(payload);
+  req.end();
+  return req;
+}
+
+// ─── Per-mode streaming parsers ───────────────────────────────────────────────
+// Each emits normalised chunk events via onChunk, then resolves with the unified
+// result object (same shape as the non-streaming parsers).
+//
+// Normalised chunk types:
+//   { type: 'text',      delta }                  — text token
+//   { type: 'reasoning', delta }                  — thinking/reasoning token
+//   { type: 'tool_start', id, name }              — tool call beginning (name known)
+//   { type: 'tool_done',  id, name, input }       — tool call complete (full input)
+//   { type: 'stats',      inputTokens, outputTokens, extra } — token counts
+//   { type: 'response_id', id }                   — LM Studio v1 response_id
+//   { type: 'done' }                              — stream finished
+//   { type: 'error',     message }                — error
+
+function streamOpenAI(request, onChunk, resolve, reject, mode) {
+  const accText  = [];
+  const accReason = [];
+  // tool_calls indexed by tc.index
+  const toolMap  = new Map();   // index → { id, name, args }
+  let inputTokens  = null;
+  let outputTokens = null;
+
+  httpStream(request.url, request.headers, request.body, {
+    onEvent: (_evtType, data) => {
+      // Some endpoints send a final chunk with only usage info and no choices
+      if (!data.choices?.length) {
+        if (data.usage) {
+          inputTokens  = data.usage.prompt_tokens     ?? inputTokens;
+          outputTokens = data.usage.completion_tokens ?? outputTokens;
+          onChunk({ type: 'stats', inputTokens, outputTokens });
+        }
+        return;
+      }
+
+      const choice = data.choices[0];
+      const delta  = choice?.delta ?? {};
+
+      // ── Reasoning content (DeepSeek R1 / QwQ via reasoning_content field) ──
+      if (delta.reasoning_content != null && delta.reasoning_content !== '') {
+        accReason.push(delta.reasoning_content);
+        onChunk({ type: 'reasoning', delta: delta.reasoning_content });
+      }
+
+      // ── Text content ──────────────────────────────────────────────────────
+      if (delta.content != null && delta.content !== '') {
+        accText.push(delta.content);
+        onChunk({ type: 'text', delta: delta.content });
+      }
+
+      // ── Tool call deltas ──────────────────────────────────────────────────
+      if (delta.tool_calls?.length) {
+        for (const tc of delta.tool_calls) {
+          if (!toolMap.has(tc.index)) {
+            toolMap.set(tc.index, { id: '', name: '', args: '' });
+          }
+          const entry = toolMap.get(tc.index);
+          if (tc.id)                   entry.id   += tc.id;
+          if (tc.function?.name)       entry.name += tc.function.name;
+          if (tc.function?.arguments)  entry.args += tc.function.arguments;
+          // Announce when we first learn the name
+          if (tc.function?.name && entry.name === tc.function.name) {
+            onChunk({ type: 'tool_start', id: entry.id, name: entry.name });
+          }
+        }
+      }
+
+      // ── Per-choice usage (some endpoints include it here) ─────────────────
+      if (data.usage) {
+        inputTokens  = data.usage.prompt_tokens     ?? inputTokens;
+        outputTokens = data.usage.completion_tokens ?? outputTokens;
+        onChunk({ type: 'stats', inputTokens, outputTokens });
+      }
+    },
+
+    onEnd: () => {
+      const rawText     = accText.join('');
+      const rawReasoning = accReason.join('') || null;
+
+      // Post-process accumulated text to extract reasoning in any supported format:
+      //   • Qwen3  <|channel|>analysis<|message|>…<|channel|>final<|message|>…
+      //   • DeepSeek / QwQ  <think>…</think>
+      // Skip if we already received reasoning via a dedicated delta field.
+      let finalText      = rawText;
+      let finalReasoning = rawReasoning;
+      if (!finalReasoning) {
+        const extracted  = extractReasoningAndText(rawText);
+        finalText        = extracted.text;
+        finalReasoning   = extracted.reasoning;
+      }
+
+      // Completed tool calls
+      const toolUse = toolMap.size > 0
+        ? [...toolMap.values()].map(tc => ({
+            id:    tc.id,
+            name:  tc.name,
+            input: (() => { try { return JSON.parse(tc.args); } catch { return {}; } })(),
+          }))
+        : null;
+
+      if (toolUse?.length) {
+        for (const tc of toolUse) {
+          onChunk({ type: 'tool_done', id: tc.id, name: tc.name, input: tc.input });
+        }
+      }
+
+      onChunk({ type: 'done' });
+
+      // Reconstruct rawContent in OpenAI message shape
+      const rawContent = toolUse?.length
+        ? {
+            role:       'assistant',
+            content:    finalText ?? null,
+            tool_calls: [...toolMap.values()].map(tc => ({
+              id:       tc.id,
+              type:     'function',
+              function: { name: tc.name, arguments: tc.args },
+            })),
+          }
+        : { role: 'assistant', content: finalText };
+
+      resolve({
+        text:       finalText || (toolUse?.length ? null : '[no response]'),
+        toolUse,
+        rawContent,
+        mode,
+        reasoning:  finalReasoning,
+        stats:      { inputTokens, outputTokens },
+        responseId: null,
+      });
+    },
+
+    onError: (err) => {
+      onChunk({ type: 'error', message: err.message });
+      reject(err);
+    },
+  });
+}
+
+function streamAnthropic(request, onChunk, resolve, reject) {
+  const blocks = new Map();     // index → { type, content, id, name }
+  let inputTokens  = null;
+  let outputTokens = null;
+
+  httpStream(request.url, request.headers, request.body, {
+    onEvent: (eventType, data) => {
+      switch (eventType) {
+        case 'message_start':
+          inputTokens = data.message?.usage?.input_tokens ?? null;
+          break;
+
+        case 'content_block_start': {
+          const cb    = data.content_block ?? {};
+          const block = { type: cb.type, content: '', id: cb.id ?? null, name: cb.name ?? null };
+          blocks.set(data.index, block);
+          if (cb.type === 'tool_use') {
+            onChunk({ type: 'tool_start', id: cb.id, name: cb.name });
+          }
+          break;
+        }
+
+        case 'content_block_delta': {
+          const block = blocks.get(data.index);
+          if (!block) break;
+          const d = data.delta ?? {};
+          if (d.type === 'text_delta') {
+            block.content += d.text;
+            onChunk({ type: 'text', delta: d.text });
+          } else if (d.type === 'thinking_delta') {
+            block.content += d.thinking;
+            onChunk({ type: 'reasoning', delta: d.thinking });
+          } else if (d.type === 'input_json_delta') {
+            block.content += d.partial_json;
+          }
+          break;
+        }
+
+        case 'content_block_stop': {
+          const block = blocks.get(data.index);
+          if (block?.type === 'tool_use') {
+            let input = {};
+            try { input = JSON.parse(block.content); } catch { /* keep empty */ }
+            onChunk({ type: 'tool_done', id: block.id, name: block.name, input });
+          }
+          break;
+        }
+
+        case 'message_delta':
+          if (data.usage?.output_tokens != null) {
+            outputTokens = data.usage.output_tokens;
+            onChunk({ type: 'stats', inputTokens, outputTokens });
+          }
+          break;
+
+        default: break;
+      }
+    },
+
+    onEnd: () => {
+      // Reconstruct full content array
+      const content = [];
+      const textParts = [], thinkParts = [], toolUse = [];
+
+      for (const [idx, block] of [...blocks.entries()].sort((a, b) => a[0] - b[0])) {
+        if (block.type === 'text') {
+          content.push({ type: 'text', text: block.content });
+          textParts.push(block.content);
+        } else if (block.type === 'thinking') {
+          content.push({ type: 'thinking', thinking: block.content });
+          thinkParts.push(block.content);
+        } else if (block.type === 'tool_use') {
+          let input = {};
+          try { input = JSON.parse(block.content); } catch {}
+          content.push({ type: 'tool_use', id: block.id, name: block.name, input });
+          toolUse.push({ id: block.id, name: block.name, input });
+        }
+      }
+
+      const text      = textParts.join('')  || null;
+      const reasoning = thinkParts.join('') || null;
+
+      onChunk({ type: 'done' });
+
+      resolve({
+        text:       text ?? (toolUse.length ? null : '[no response]'),
+        toolUse:    toolUse.length ? toolUse : null,
+        rawContent: content,
+        mode:       'anthropic',
+        reasoning,
+        stats:      { inputTokens, outputTokens },
+        responseId: null,
+      });
+    },
+
+    onError: (err) => {
+      onChunk({ type: 'error', message: err.message });
+      reject(err);
+    },
+  });
+}
+
+// LM Studio v1 streaming — documented event format:
+//   message.delta   → data.content  (text token)
+//   reasoning.delta → data.content  (reasoning token)
+//   tool_call.start → data.tool     (server-side tool name, informational)
+//   chat.end        → data.result   (full non-streaming response object)
+//   error           → data.error    (partial error, stream continues to chat.end)
+// All other events (chat.start, model_load.*, prompt_processing.*, *.start, *.end,
+// tool_call.arguments/success/failure) are silently ignored.
+
+function streamLMStudioV1(request, onChunk, resolve, reject) {
+  let resolved = false;
+
+  httpStream(request.url, request.headers, request.body, {
+    onEvent: (_eventType, data) => {
+      // data.type is the canonical event identifier (mirrors SSE event: field)
+      switch (data.type) {
+
+        case 'message.delta':
+          if (data.content) onChunk({ type: 'text', delta: data.content });
+          break;
+
+        case 'reasoning.delta':
+          if (data.content) onChunk({ type: 'reasoning', delta: data.content });
+          break;
+
+        case 'tool_call.start':
+          // LM Studio executes these server-side — just show progress to the user
+          if (data.tool) onChunk({ type: 'tool_start', id: null, name: data.tool });
+          break;
+
+        case 'chat.end': {
+          if (resolved) break;
+          const fullResponse = data.result;
+          if (!fullResponse) break;
+          resolved = true;
+          const parsed = parseLMStudioV1Response(fullResponse);
+          if (parsed.stats?.inputTokens != null || parsed.stats?.outputTokens != null) {
+            onChunk({ type: 'stats',
+              inputTokens:  parsed.stats.inputTokens,
+              outputTokens: parsed.stats.outputTokens,
+              extra:        parsed.stats,
+            });
+          }
+          if (parsed.responseId) onChunk({ type: 'response_id', id: parsed.responseId });
+          onChunk({ type: 'done' });
+          resolve(parsed);
+          break;
+        }
+
+        case 'error':
+          // Non-fatal stream error — LM Studio still sends chat.end afterwards
+          console.warn('[llm:stream:v1]', data.error?.message ?? 'stream error');
+          break;
+
+        // chat.start, model_load.*, prompt_processing.*, reasoning.start/end,
+        // message.start/end, tool_call.arguments/success/failure → no-op
+        default: break;
+      }
+    },
+
+    onEnd: () => {
+      // chat.end fires before [DONE] and resolves the promise above.
+      // If we get here without resolving (malformed stream), return a fallback.
+      if (resolved) return;
+      onChunk({ type: 'done' });
+      resolve({
+        text:            '[stream ended without response]',
+        toolUse:         null,
+        rawContent:      [],
+        mode:            'lmstudio-v1',
+        reasoning:       null,
+        stats:           { inputTokens: null, outputTokens: null },
+        responseId:      null,
+        serverToolCalls: null,
+      });
+    },
+
+    onError: (err) => {
+      onChunk({ type: 'error', message: err.message });
+      reject(err);
+    },
+  });
+}
+
 // ─── Response parsers ─────────────────────────────────────────────────────────
 //
 // All parsers now return a unified object:
@@ -207,6 +609,42 @@ function extractThinkTags(raw) {
   };
 }
 
+// Extracts Qwen3's multi-channel thinking format:
+//   <|channel|>analysis<|message|>REASONING<|end|><|start|>assistant<|channel|>final<|message|>TEXT
+//
+// The 'analysis' channel maps to reasoning; the 'final' channel maps to the
+// response text.  Returns null if the input doesn't look like this format so
+// the caller can fall through to other extractors.
+function extractQwenChannels(raw) {
+  if (!raw || !raw.includes('<|channel|>')) return null;
+
+  const channels = {};
+  // Each channel block ends at <|end|>, <|start|>, or end of string
+  const re = /<\|channel\|>(\w+)<\|message\|>([\s\S]*?)(?=<\|end\|>|<\|start\|>|$)/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    channels[m[1]] = m[2].trim();
+  }
+
+  // Require at least a 'final' (or 'response') channel to confirm the format.
+  // Without it we might misparse something that just happens to contain the token.
+  if (!('final' in channels) && !('response' in channels)) return null;
+
+  const text      = (channels.final    ?? channels.response ?? '').trim() || '[no response]';
+  const reasoning = (channels.analysis ?? channels.thinking ?? '').trim() || null;
+  return { text, reasoning };
+}
+
+// Unified reasoning/text extractor for OpenAI-compat responses.
+// Priority:  1. Qwen3 <|channel|> format
+//            2. DeepSeek / QwQ <think>...</think> tags
+//            3. Raw string as-is (no reasoning)
+function extractReasoningAndText(raw) {
+  const qwen = extractQwenChannels(raw);
+  if (qwen) return qwen;
+  return extractThinkTags(raw ?? '[no response]');
+}
+
 function parseOpenAIResponse(data, mode) {
   const choice = data.choices?.[0];
   const msg    = choice?.message;
@@ -226,7 +664,7 @@ function parseOpenAIResponse(data, mode) {
       name:  tc.function.name,
       input: (() => { try { return JSON.parse(tc.function.arguments); } catch { return {}; } })(),
     }));
-    const { reasoning } = extractThinkTags(msg.content ?? '');
+    const { reasoning } = extractReasoningAndText(msg.content ?? '');
     return {
       text:       msg.content ?? null,
       toolUse,
@@ -238,9 +676,10 @@ function parseOpenAIResponse(data, mode) {
     };
   }
 
-  // Many open-source reasoning models (DeepSeek R1, QwQ, etc.) prefix their
-  // response with <think>...</think> when served via OpenAI-compat endpoints.
-  const { text, reasoning } = extractThinkTags(msg.content ?? '[no response]');
+  // Many open-source reasoning models prefix their response with a reasoning
+  // block — either <think>…</think> (DeepSeek/QwQ) or Qwen3's multi-channel
+  // <|channel|>analysis<|message|>…<|channel|>final<|message|>… format.
+  const { text, reasoning } = extractReasoningAndText(msg.content ?? '[no response]');
   return {
     text,
     toolUse:    null,
@@ -279,13 +718,13 @@ function parseLMStudioV1Response(data) {
   const toolCallBlocks = outputs.filter(o => o.type === 'tool_call');
 
   // Merge LM Studio performance stats (tok/s, TTFT) with token usage counts.
-  // LM Studio v1 may report usage as data.usage.input_tokens / output_tokens
-  // or fall back to stats.prompt_eval_count / tokens_generated if present.
+  // Priority: data.usage fields → data.stats fields (input_tokens, total_output_tokens)
+  //           → legacy fallbacks (prompt_eval_count, tokens_generated)
   const perfStats = data.stats ?? {};
   const stats = {
     ...perfStats,
-    inputTokens:  data.usage?.input_tokens  ?? data.usage?.prompt_tokens     ?? perfStats.prompt_eval_count  ?? null,
-    outputTokens: data.usage?.output_tokens ?? data.usage?.completion_tokens ?? perfStats.tokens_generated   ?? null,
+    inputTokens:  data.usage?.input_tokens  ?? data.usage?.prompt_tokens     ?? perfStats.input_tokens        ?? perfStats.prompt_eval_count  ?? null,
+    outputTokens: data.usage?.output_tokens ?? data.usage?.completion_tokens ?? perfStats.total_output_tokens ?? perfStats.tokens_generated   ?? null,
   };
 
   return {
@@ -351,6 +790,43 @@ async function complete({ endpoint, model, systemPrompt, apiKey, messages, previ
   return parseOpenAIResponse(data, mode);
 }
 
+// ─── stream ───────────────────────────────────────────────────────────────────
+// Same args as complete(), plus onChunk callback for incremental events.
+// Returns a Promise that resolves with the unified result when the stream ends.
+// onChunk is called with normalised chunk objects (see streaming parsers above).
+
+async function stream({ endpoint, model, systemPrompt, apiKey, messages, previousResponseId, store, tools, integrations }, onChunk) {
+  if (!endpoint)         throw new Error('No endpoint configured for this persona.');
+  if (!messages?.length) throw new Error('No messages to send.');
+
+  const mode = detectMode(endpoint);
+
+  let request;
+  if (mode === 'anthropic') {
+    request = buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
+    request.body.stream = true;
+  } else if (mode === 'lmstudio-v1') {
+    request = buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store, integrations });
+    request.body.stream = true;
+  } else {
+    request = buildOpenAIRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
+    request.body.stream = true;
+  }
+
+  console.log(`\n[llm:stream] ▶ mode=${mode}  model=${model}  endpoint=${request.url}`);
+  console.log('[llm:stream] REQUEST:', JSON.stringify(request.body, null, 2));
+
+  return new Promise((resolve, reject) => {
+    if (mode === 'anthropic') {
+      streamAnthropic(request, onChunk, resolve, reject);
+    } else if (mode === 'lmstudio-v1') {
+      streamLMStudioV1(request, onChunk, resolve, reject);
+    } else {
+      streamOpenAI(request, onChunk, resolve, reject, mode);
+    }
+  });
+}
+
 // ─── fetchModels ──────────────────────────────────────────────────────────────
 // args: { endpoint, apiKey }
 // Queries the model list endpoint (LM Studio /api/v0/models or OpenAI /v1/models).
@@ -378,4 +854,4 @@ async function fetchModels({ endpoint, apiKey }) {
     }));
 }
 
-module.exports = { complete, fetchModels };
+module.exports = { complete, stream, fetchModels };

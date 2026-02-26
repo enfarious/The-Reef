@@ -102,6 +102,11 @@ const MCP_TOOL_DEFS = [
     },
   },
   {
+    name: 'ecology_monitor', skillName: 'memory.monitor',
+    description: 'Return colony-wide memory ecology stats: total memories, breakdown by type and persona, link counts, tag usage, and recent activity. Useful for a health check on the collective memory.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'reef_post', skillName: 'reef.post',
     description: 'Post an entry to The Reef documentation site.',
     inputSchema: {

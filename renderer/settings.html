@@ -51,6 +51,48 @@
         </div>
         <div class="sw-hint">How often the colony wakes for a scheduled check-in (5–1440 min).</div>
       </div>
+
+      <div class="sw-field">
+        <label class="sw-label">CONTEXT WINDOW LENGTH</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sContextWindow"
+                 type="number" min="512" max="131072" step="512" value="4096">
+          <span class="sw-unit">tokens</span>
+        </div>
+        <div class="sw-hint">Match your LM Studio loaded context size. Default 4096. Controls auto-compaction threshold and memory load budget.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">MAX TOOL STEPS</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sMaxToolSteps"
+                 type="number" min="1" max="20" step="1" value="5">
+          <span class="sw-unit">steps</span>
+        </div>
+        <div class="sw-hint">Maximum tool call iterations per response before forcing a final text reply (1–20).</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">MAX THINKING TIME</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sMaxThinkingTime"
+                 type="number" min="0" max="600" step="10" value="120">
+          <span class="sw-unit">sec</span>
+        </div>
+        <div class="sw-hint">Interrupt a running response after this many seconds. 0 = no limit.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">STREAM CHAT</label>
+        <div class="sw-row-inline">
+          <label class="sw-toggle">
+            <input type="checkbox" id="sStreamChat">
+            <span class="sw-toggle-track"></span>
+          </label>
+          <span class="sw-toggle-label" id="sStreamChatLabel">OFF</span>
+        </div>
+        <div class="sw-hint">Stream responses token-by-token. Shows text, reasoning, and tool calls live. Supported for all API modes.</div>
+      </div>
     </section>
 
     <!-- ARCHIVES ────────────────────────────────────────────────────────── -->

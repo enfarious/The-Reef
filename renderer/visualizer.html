@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory Graph</title>
+  <link rel="stylesheet" href="inspector.css">
+  <link rel="stylesheet" href="visualizer.css">
+</head>
+<body>
+
+<div class="vis-shell">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────────── -->
+  <div class="vis-header">
+    <span class="insp-title">⬡ MEMORY GRAPH</span>
+
+    <select class="insp-select" id="visPersonaFilter">
+      <option value="">ALL ENTITIES</option>
+    </select>
+
+    <select class="insp-select" id="visTypeFilter">
+      <option value="">ALL TYPES</option>
+    </select>
+
+    <label class="vis-check-label">
+      <input type="checkbox" id="visShowLabels" checked>
+      <span>LABELS</span>
+    </label>
+
+    <button class="insp-btn" id="visResetBtn">RESET VIEW</button>
+    <button class="insp-btn" id="visExportBtn">EXPORT PNG</button>
+
+    <span class="vis-stats" id="visStats">— loading —</span>
+    <span class="vis-controls-hint">drag: pan · right-drag: orbit · scroll: zoom · click node: inspect</span>
+  </div>
+
+  <!-- ── Canvas + detail panel ─────────────────────────────────────────────── -->
+  <div class="vis-body">
+    <canvas id="visCanvas"></canvas>
+
+    <div class="vis-detail" id="visDetail">
+      <button class="vis-detail-close" id="visDetailClose" title="Close">×</button>
+      <div id="visDetailInner"></div>
+    </div>
+  </div>
+
+  <!-- ── Legend ────────────────────────────────────────────────────────────── -->
+  <div class="vis-legend" id="visLegend"></div>
+
+</div>
+
+<script src="visualizer.js"></script>
+</body>
+</html>

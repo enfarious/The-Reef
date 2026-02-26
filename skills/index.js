@@ -22,12 +22,14 @@ registry.set('reef.list',   reef.list);
 registry.set('reef.update', reef.update);
 
 const memory = require('./memory');
-registry.set('memory.save',   memory.save);
-registry.set('memory.search', memory.search);
-registry.set('memory.wakeup', memory.wakeup);
-registry.set('memory.list',   memory.list);
-registry.set('memory.update', memory.update);
-registry.set('memory.link',   memory.link);
+registry.set('memory.save',    memory.save);
+registry.set('memory.search',  memory.search);
+registry.set('memory.wakeup',  memory.wakeup);
+registry.set('memory.list',    memory.list);
+registry.set('memory.update',  memory.update);
+registry.set('memory.link',    memory.link);
+registry.set('memory.graph',   memory.graph);
+registry.set('memory.monitor', memory.monitor);
 
 const message = require('./message');
 registry.set('message.send',   message.send);

@@ -57,6 +57,9 @@ const state = {
   // subsequent turns only need to send the new `input`, not the full history.
   // Reset to null on clear or when the endpoint changes.
   lastResponseId: { A: null, B: null, C: null },
+  // Timestamp (Date.now()) of the last user-initiated response completion per
+  // persona.  Used to suppress heartbeats while an entity is actively working.
+  lastActivity:   { A: null, B: null, C: null },
   // Token tracking: { inputTokens, outputTokens } from the most recent API
   // response.  null until first response.  Cleared on context compaction.
   lastTokens:    { A: null, B: null, C: null },
@@ -81,11 +84,76 @@ const state = {
                 fontScale: 100, fontColors: 'cool',
                 operatorName: '', operatorBirthdate: '', operatorAbout: '',
                 heartbeatInterval: 60,   // minutes; 60 = hourly
+                streamChat: false,       // stream responses token-by-token
                 toolStates: {}, customTools: [],
                 cwd: null },
   },
   selectedTargets: new Set(['A']),
 };
+
+// ─── Per-persona message queue ────────────────────────────────────────────────
+// Messages sent while an entity is already thinking are stored here and
+// processed in order once the entity finishes its current response.
+// Each entry: { display: string, content: string }
+const messageQueue = { A: [], B: [], C: [] };
+
+// ─── Global LLM call concurrency ─────────────────────────────────────────────
+// Prevents all three entities hammering the LLM simultaneously.
+// With a local LM Studio, only one model is running — serialising calls avoids
+// timeouts and gives each entity a fair turn between tool loop steps.
+// Increase MAX_LLM_CONCURRENT for cloud APIs that handle parallel requests well.
+const MAX_LLM_CONCURRENT = 1;
+let   llmActiveSlots  = 0;
+const llmSlotWaiters  = [];
+
+function acquireLlmSlot() {
+  return new Promise(resolve => {
+    if (llmActiveSlots < MAX_LLM_CONCURRENT) { llmActiveSlots++; resolve(); }
+    else llmSlotWaiters.push(resolve);
+  });
+}
+
+function releaseLlmSlot() {
+  const next = llmSlotWaiters.shift();
+  if (next) { next(); }              // hand slot directly to next waiter
+  else { llmActiveSlots = Math.max(0, llmActiveSlots - 1); }
+}
+
+// ─── Tool-loop abort ──────────────────────────────────────────────────────────
+// Cooperative abort: flag is checked at the top of every tool loop iteration.
+// The current in-flight LLM call completes normally (cancelling a streaming
+// fetch mid-flight would require threading AbortController through the whole
+// call chain — left for a future pass).  The UI seam appears immediately when
+// the flag is set so the user gets instant feedback.
+//
+// thinkingTimers: per-entity setTimeout handle for the wall-clock limit.
+// abortFlags:     set by abortPersona(), cleared by the loop on detection.
+
+const abortFlags    = { A: false, B: false, C: false };
+const thinkingTimers = { A: null,  B: null,  C: null  };
+
+function getMaxToolSteps() {
+  // Read from settings at call time so changes take effect without reload.
+  // Capped by HARD_TOOL_CAP regardless of what the user configures.
+  return Math.min(
+    Math.max(1, state.config.settings?.maxToolSteps ?? 5),
+    HARD_TOOL_CAP,
+  );
+}
+
+function abortPersona(id, reason = '⏱ TIMED OUT') {
+  abortFlags[id] = true;
+  // Show the seam immediately — the loop will terminate after the current
+  // LLM call finishes (cooperative, not preemptive).
+  const msgs = document.getElementById(`msgs-${id}`);
+  if (msgs) {
+    const seam = document.createElement('div');
+    seam.className = 'timeout-seam';
+    seam.textContent = reason;
+    msgs.appendChild(seam);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
 
 // ─── Colony UI ────────────────────────────────────────────────────────────────
 
@@ -111,6 +179,7 @@ function buildColony() {
             <span class="ctx-counter" id="ctx-${p.id}" title="Context size (messages · estimated tokens)">0</span>
             <button class="reef-post-btn" data-persona-fold="${p.id}" title="Compact context to memory">⊡ FOLD</button>
             <button class="reef-post-btn" data-persona-post="${p.id}">→ REEF</button>
+            <button class="reef-post-btn stop-btn" id="stop-${p.id}" data-persona-stop="${p.id}" title="Interrupt this entity" style="display:none">✕</button>
             <div class="status-dot" id="dot-${p.id}"></div>
           </div>
         </div>
@@ -324,6 +393,12 @@ document.addEventListener('click', e => {
   // Context fold (compact) buttons
   if (e.target.matches('[data-persona-fold]')) {
     compactPersona(e.target.dataset.personaFold);
+  }
+
+  // ✕ STOP — manually interrupt a running tool loop
+  if (e.target.matches('[data-persona-stop]')) {
+    const sid = e.target.dataset.personaStop;
+    if (state.thinking[sid]) abortPersona(sid, '✕ INTERRUPTED');
   }
 
   // Model refresh buttons
@@ -560,7 +635,8 @@ function personaHasApiAccess(id) {
 // and uses whatever tools are enabled.  Each persona can also be pulsed
 // manually via its ♥ BEAT button.
 
-let heartbeatTimer = null;
+let heartbeatTimer  = null;
+let heartbeatTimers = [];   // per-entity staggered timers (replaces single shared timer)
 
 // ─── Context compaction ────────────────────────────────────────────────────────
 //
@@ -571,7 +647,35 @@ let heartbeatTimer = null;
 // LM Studio starts a new server-side conversation.  For Anthropic / OpenAI modes
 // clearing state.conversations[id] is sufficient.
 
-const COMPACT_THRESHOLD = 30;  // messages
+const COMPACT_THRESHOLD      = 30;    // messages before auto-compaction triggers (fallback)
+const DEFAULT_CONTEXT_WINDOW = 4096;  // LM Studio default context length — used as the
+                                      // conservative baseline when the user hasn't overridden.
+
+// Returns the configured context window, or the safe default if not set.
+// All token-based logic (auto-compact, counter colours, memory budget) reads
+// from this single place so changing the setting affects everything at once.
+function getContextWindow() {
+  return state.config.settings?.contextWindow || DEFAULT_CONTEXT_WINDOW;
+}
+
+// Auto-compact guard — called before every real sendToPersona so the model
+// always has enough headroom for the new message + its response.
+// When real token counts are available, compacts at 85 % of the configured
+// context window.  Before the first response (no real counts yet) falls back
+// to the message-count threshold.
+async function maybeAutoCompact(id) {
+  if (state.thinking[id]) return;
+  const inToks  = state.lastTokens[id]?.inputTokens  ?? null;
+  const outToks = state.lastTokens[id]?.outputTokens ?? null;
+  const ctxWin  = getContextWindow();
+
+  if (inToks != null) {
+    const currentToks = inToks + (outToks ?? 0);
+    if (currentToks >= ctxWin * 0.85) await compactPersona(id);
+  } else {
+    if (state.conversations[id].length >= COMPACT_THRESHOLD) await compactPersona(id);
+  }
+}
 
 const COMPACT_PROMPT =
 `[COMPACT] Your context window has grown long. Before we continue, please save \
@@ -596,28 +700,54 @@ function estimateTokens(id) {
 function updateContextCounter(id) {
   const el = document.getElementById(`ctx-${id}`);
   if (!el) return;
-  const count  = state.conversations[id].length;
-  const actual = state.lastTokens[id]?.inputTokens ?? null;   // from API (exact)
-  const maxCtx = state.maxContext[id] ?? null;                // from model list
-  const toks   = actual ?? estimateTokens(id);                // prefer real, else estimate
-  const prefix = actual != null ? '' : '~';                   // ~ when estimated
 
-  // e.g. "12 · 4.2k" or "12 · ~4.2k / 32k"
-  const tokStr = toks >= 1000
-    ? `${prefix}${(toks / 1000).toFixed(1)}k`
-    : `${prefix}${toks}`;
-  let display = count ? `${count} · ${tokStr}` : '0';
-  if (maxCtx) {
-    const maxStr = maxCtx >= 1000 ? `${Math.round(maxCtx / 1000)}k` : `${maxCtx}`;
-    display += ` / ${maxStr}`;
+  const count   = state.conversations[id].length;
+
+  // Empty context — reset cleanly and bail.
+  if (!count) {
+    el.textContent = '0';
+    el.title       = '0 messages';
+    el.style.color = '';
+    return;
   }
-  el.textContent = display;
-  el.title = maxCtx
-    ? `${actual != null ? '' : 'est. '}${toks.toLocaleString()} / ${maxCtx.toLocaleString()} tokens (${count} messages)`
-    : `${actual != null ? '' : 'est. '}${toks.toLocaleString()} tokens (${count} messages)`;
 
-  // Colour by fill percentage — token ratio when we have both figures, else message count
-  const pct = (maxCtx && toks) ? (toks / maxCtx) : (count / COMPACT_THRESHOLD);
+  const inToks  = state.lastTokens[id]?.inputTokens  ?? null;
+  const outToks = state.lastTokens[id]?.outputTokens ?? null;
+  const maxCtx  = state.maxContext[id] ?? null;  // model's architectural ceiling
+
+  // Total tokens currently in context:
+  //   inputTokens  = tokens the model processed on the last call (system + history + user msg)
+  //   outputTokens = tokens the model generated (now appended to history)
+  //   Sum          = what the NEXT call will need to process before any new user message.
+  // When real figures aren't available yet we estimate from raw character counts.
+  const hasActual = inToks != null;
+  const toks      = hasActual ? inToks + (outToks ?? 0) : estimateTokens(id);
+  const prefix    = hasActual ? '' : '~';
+
+  // e.g.  "12 · 7.9k"
+  const tokStr  = toks >= 1000 ? `${prefix}${(toks / 1000).toFixed(1)}k` : `${prefix}${toks}`;
+  el.textContent = `${count} · ${tokStr}`;
+
+  // Tooltip — show token breakdown, the default window baseline, and the model hard ceiling.
+  const breakdown = (hasActual && outToks != null)
+    ? `${inToks.toLocaleString()} in + ${outToks.toLocaleString()} out = ${toks.toLocaleString()} tokens`
+    : `${prefix}${toks.toLocaleString()} tokens`;
+  const ctxWin   = getContextWindow();
+  const isCustom = !!(state.config.settings?.contextWindow);
+  const winLabel = isCustom
+    ? `${ctxWin >= 1000 ? (ctxWin / 1000).toFixed(0) + 'k' : ctxWin} window`
+    : `${DEFAULT_CONTEXT_WINDOW / 1000}k window (default)`;
+  const hardMax  = maxCtx
+    ? ` · model max: ${maxCtx >= 1000 ? Math.round(maxCtx / 1000) + 'k' : maxCtx}`
+    : '';
+  el.title = `${breakdown} · ${count} messages · ${winLabel}${hardMax}`;
+
+  // Colour warnings use the configured context window (or 4096 default) so the
+  // thresholds stay accurate when the user adjusts their LM Studio context size.
+  const pct = hasActual
+    ? toks / ctxWin
+    : count / COMPACT_THRESHOLD;
+
   if (pct >= 0.9) {
     el.style.color = 'rgba(255,120,80,0.9)';
   } else if (pct >= 0.6) {
@@ -664,39 +794,72 @@ Check your messages — use message_inbox to retrieve any unread correspondence 
 from your colony members. If there are messages, read and reply to each using \
 message_reply.
 
-If your inbox is empty, act on your own initiative: post a thought to The Reef, \
-save a memory, or simply note that you checked in and found stillness.
+If your inbox is empty, act on your own initiative: save a memory, link related \
+memories together, or send a message to a colony member. This is quiet time — \
+for tending the garden, not for publishing.
 
 Be yourself.`;
+
+// How long after real activity before a heartbeat is allowed to fire.
+const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000;  // 10 minutes
 
 async function runHeartbeatFor(personaId) {
   // Don't interrupt an active session, and skip if the persona isn't wired up yet
   if (state.thinking[personaId]) return;
   if (!personaHasApiAccess(personaId)) return;
 
-  // Auto-compact before the heartbeat if context has grown too long
-  if (state.conversations[personaId].length >= COMPACT_THRESHOLD) {
-    await compactPersona(personaId);
-  }
+  // Skip if the entity was recently active — avoids interrupting live work and
+  // naturally desyncs entities that have different conversation tempos.
+  const last = state.lastActivity[personaId];
+  if (last && (Date.now() - last) < HEARTBEAT_COOLDOWN_MS) return;
+
+  // Auto-compact before the heartbeat if context has grown too large
+  await maybeAutoCompact(personaId);
 
   const btn = document.querySelector(`[data-persona-pulse="${personaId}"]`);
   if (btn) { btn.classList.remove('pulse-lit'); btn.textContent = '♥ BEAT'; }
 
-  // Show a compact label in the chat log; send the full prompt to the model.
-  appendUserMsg(personaId, '♥ HEARTBEAT', HEARTBEAT_PROMPT);
-  await sendToPersona(personaId);
+  // Show a seam in the chat log (DOM only — heartbeat prompt never enters
+  // state.conversations; the actual call is fully isolated).
+  const msgs = document.getElementById(`msgs-${personaId}`);
+  if (msgs) {
+    const seam = document.createElement('div');
+    seam.className = 'heartbeat-seam';
+    seam.textContent = '♥ HEARTBEAT';
+    msgs.appendChild(seam);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  await sendToPersona(personaId, { isHeartbeat: true });
 
   if (btn) { btn.classList.add('pulse-lit'); btn.textContent = '♥ ALIVE'; }
 }
 
+// Start per-entity staggered heartbeat timers.
+// Each entity gets a random initial delay within [0, interval) so they fire at
+// different times and don't all hit the LLM simultaneously.
 function startHeartbeat() {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  const mins = Math.max(5, state.config.settings.heartbeatInterval || 60);
-  heartbeatTimer = setInterval(async () => {
-    for (const p of PERSONAS) {
-      await runHeartbeatFor(p.id);  // sequential — they wake one at a time
-    }
-  }, mins * 60 * 1000);
+  // Clear any existing timers (both old single-timer and new per-entity style)
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  heartbeatTimers.forEach(entry => {
+    if (entry.init)      clearTimeout(entry.init);
+    if (entry.recurring) clearInterval(entry.recurring);
+  });
+  heartbeatTimers = [];
+
+  const mins       = Math.max(5, state.config.settings.heartbeatInterval || 60);
+  const intervalMs = mins * 60 * 1000;
+
+  heartbeatTimers = PERSONAS.map(p => {
+    const entry = { init: null, recurring: null };
+    // Spread first fire randomly across the interval so entities desync
+    const jitter = Math.floor(Math.random() * intervalMs);
+    entry.init = setTimeout(() => {
+      runHeartbeatFor(p.id);
+      entry.recurring = setInterval(() => runHeartbeatFor(p.id), intervalMs);
+    }, jitter);
+    return entry;
+  });
 }
 
 // ─── @mention routing ─────────────────────────────────────────────────────────
@@ -875,6 +1038,11 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'ecology_monitor', skillName: 'memory.monitor',
+    description: 'Return colony-wide memory ecology stats: total memories, breakdown by type and persona, link counts, tag usage, and recent activity. Useful for a health check on the collective memory.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'reef_post', skillName: 'reef.post',
     description: 'Post an entry to The Reef documentation site.',
     input_schema: {
@@ -1014,6 +1182,12 @@ function apiToolDefs() {
   });
 }
 
+// Heartbeat-safe tool set — reef_post excluded because heartbeats are for
+// memory management and inter-colony messaging, not content publishing.
+function heartbeatApiToolDefs() {
+  return apiToolDefs().filter(t => t.name !== 'reef_post');
+}
+
 // ─── Messaging ────────────────────────────────────────────────────────────────
 
 async function sendMessage() {
@@ -1038,9 +1212,41 @@ async function sendMessage() {
   resizeTextarea(input);
 
   targets.forEach(id => {
-    appendUserMsg(id, raw, cleanText);
-    sendToPersona(id);
+    if (state.thinking[id]) {
+      // Entity is busy — queue this message; it will be sent when free.
+      messageQueue[id].push({ display: raw, content: cleanText });
+      // Show a lightweight indicator so the user knows the message was accepted.
+      const msgs = document.getElementById(`msgs-${id}`);
+      if (msgs) {
+        const seam = document.createElement('div');
+        seam.className = 'queued-seam';
+        seam.textContent = `⧗ QUEUED${messageQueue[id].length > 1 ? ` ×${messageQueue[id].length}` : ''}`;
+        msgs.appendChild(seam);
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+    } else {
+      // Auto-compact BEFORE appending the new message so the entity has a
+      // chance to save context while the history is still intact.  The user
+      // message is then appended to the (possibly freshly cleared) conversation.
+      (async () => {
+        await maybeAutoCompact(id);
+        appendUserMsg(id, raw, cleanText);
+        sendToPersona(id).finally(() => drainMessageQueue(id));
+      })();
+    }
   });
+}
+
+// Process any messages that arrived while this entity was thinking.
+// Called after every sendToPersona so queued messages are never dropped.
+async function drainMessageQueue(id) {
+  while (messageQueue[id].length > 0) {
+    if (state.thinking[id]) return;   // guard — shouldn't happen, but be safe
+    const { display, content } = messageQueue[id].shift();
+    await maybeAutoCompact(id);       // compact check before each drained message too
+    appendUserMsg(id, display, content);
+    await sendToPersona(id);
+  }
 }
 
 // displayText — shown in the bubble (original, may include @mentions)
@@ -1080,10 +1286,15 @@ function appendUserMsg(id, displayText, modelContent = null) {
 // anthropic/openai/lmstudio tools use the client-side loop.
 // colony_ask is handled renderer-side so it can reach into other persona state.
 
-const MAX_TOOL_STEPS = 5;
-const HARD_TOOL_CAP  = 8;
+const HARD_TOOL_CAP  = 20;  // absolute ceiling regardless of settings
 
-async function sendToPersona(id) {
+// { isHeartbeat } — when true the call is fully isolated:
+//   • uses a local message buffer (starts with the heartbeat prompt) — never touches state.conversations
+//   • no previousResponseId (fresh, unchained call)
+//   • store:false for LM Studio v1 (don't persist to server context)
+//   • reef_post excluded from tools
+//   • state.lastResponseId / state.lastTokens / state.lastActivity are NOT updated
+async function sendToPersona(id, { isHeartbeat = false } = {}) {
   if (state.thinking[id]) return;
 
   const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
@@ -1092,16 +1303,18 @@ async function sendToPersona(id) {
   // For lmstudio-v1, tools are handled server-side via MCP integrations — no
   // client loop needed.  For all other modes, run the standard client loop.
   const useTools = mode !== 'lmstudio-v1';
-  const stepCap  = useTools ? Math.min(MAX_TOOL_STEPS, HARD_TOOL_CAP) : 0;
+  const stepCap  = useTools ? getMaxToolSteps() : 0;
 
   // Build MCP integrations for LM Studio v1 (once, same for every loop step).
   // Only built-in tools with a skillName can go through MCP; colony_ask and
   // custom tools (which have their own HTTP endpoints) are excluded.
+  // For heartbeats: also exclude reef_post (not a publishing session).
   let v1Integrations;
   if (mode === 'lmstudio-v1' && state.mcpPort) {
     const toolStates = state.config.settings.toolStates || {};
     const enabledMcpTools = TOOL_DEFS
       .filter(t => t.skillName && t.name !== 'colony_ask')
+      .filter(t => isHeartbeat ? t.name !== 'reef_post' : true)
       .filter(t => toolStates[t.name] !== false)
       .map(t => t.name);
 
@@ -1115,54 +1328,132 @@ async function sendToPersona(id) {
     }
   }
 
+  const useStreaming = state.config.settings.streamChat === true;
+
+  // Isolated heartbeat buffer — starts with just the heartbeat prompt.
+  // Accumulates tool call/result turns during the tool loop (never merged into
+  // state.conversations).  null for normal calls.
+  const localMessages = isHeartbeat ? [{ role: 'user', content: HEARTBEAT_PROMPT }] : null;
+
+  // Options forwarded to callPersonaOnce/Stream for isolated heartbeat calls.
+  const callOpts = isHeartbeat
+    ? { messages: localMessages, previousResponseId: undefined,
+        store: false, suppressResponseId: true, suppressStats: true }
+    : {};
+
   setThinking(id, true);
 
   for (let step = 0; step <= stepCap; step++) {
-    const isLastStep = step === stepCap;
-    // On the last step force no tools so the model must give a text answer
-    const tools = (useTools && !isLastStep) ? apiToolDefs() : [];
+    // Check for a cooperative abort (triggered by timeout timer or ✕ STOP button).
+    // The seam was already shown by abortPersona(); just exit the loop cleanly.
+    if (abortFlags[id]) { abortFlags[id] = false; break; }
 
-    const result = await callPersonaOnce(id, tools, v1Integrations);
-    if (!result) { setThinking(id, false); updateContextCounter(id); return; } // error shown inside callPersonaOnce
+    const isLastStep = step === stepCap;
+    // On the last step force no tools so the model must give a text answer.
+    // Heartbeats use the reef-post-free tool set.
+    const tools = (useTools && !isLastStep)
+      ? (isHeartbeat ? heartbeatApiToolDefs() : apiToolDefs())
+      : [];
+
+    const result = useStreaming
+      ? await callPersonaStream(id, tools, v1Integrations, callOpts)
+      : await callPersonaOnce(id, tools, v1Integrations, callOpts);
+    if (!result) {
+      setThinking(id, false);
+      if (!isHeartbeat) state.lastActivity[id] = Date.now();
+      updateContextCounter(id);
+      return;
+    }
 
     const { text, toolUse, rawContent, reasoning, stats, responseId, mode: respMode } = result;
 
-    if (responseId) state.lastResponseId[id] = responseId;
-
-    // Store actual token count so the context counter can show real figures
-    if (stats?.inputTokens != null) {
-      state.lastTokens[id] = { inputTokens: stats.inputTokens, outputTokens: stats.outputTokens ?? null };
+    // Only update persistent state for normal (non-heartbeat) calls.
+    if (!isHeartbeat) {
+      if (responseId) state.lastResponseId[id] = responseId;
+      // Store actual token count so the context counter can show real figures
+      if (stats?.inputTokens != null) {
+        state.lastTokens[id] = { inputTokens: stats.inputTokens, outputTokens: stats.outputTokens ?? null };
+      }
     }
 
     // ── No tool calls (or last step) — render final response and stop ──────────
     if (!toolUse?.length || isLastStep) {
       if (text) {
         const msgId  = uid();
-        const aDiv   = appendAssistantMsg(id, text, reasoning ?? null, stats ?? null);
-        state.conversations[id].push({ _id: msgId, role: 'assistant', content: text });
-        if (aDiv) { aDiv.dataset.personaId = id; aDiv.dataset.msgId = msgId; }
+        let aDiv;
+        if (result._bubble) {
+          // Streaming: bubble is already in the DOM — finalize it in-place
+          aDiv = finalizeStreamingBubble(result._bubble, text, reasoning ?? null, stats ?? null);
+        } else {
+          aDiv = appendAssistantMsg(id, text, reasoning ?? null, stats ?? null);
+        }
+        // Only persist to conversation history for normal calls
+        if (!isHeartbeat) {
+          state.conversations[id].push({ _id: msgId, role: 'assistant', content: text });
+          if (aDiv) { aDiv.dataset.personaId = id; aDiv.dataset.msgId = msgId; }
+        }
+      } else if (result._bubble) {
+        // No text (e.g. pure reasoning or empty) — remove the streaming bubble
+        result._bubble.remove();
       }
+
+      // ── Render LM Studio v1 server-side tool calls ─────────────────────────
+      // These are already executed by LM Studio (via MCP integrations) — we
+      // show them as collapsible indicators so the user can inspect what ran.
+      if (result.serverToolCalls?.length) {
+        for (const tc of result.serverToolCalls) {
+          const name  = tc.tool ?? tc.name ?? 'tool';
+          const input = tc.arguments ?? tc.input ?? {};
+          appendToolCallIndicator(id, name, input);
+          if (tc.output != null) {
+            appendToolResultIndicator(id, name, String(tc.output));
+          }
+        }
+      }
+
       setThinking(id, false);
+      if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
       return;
     }
 
     // ── Tool calls present — push assistant turn, execute, loop ───────────────
 
-    // Show any text the model produced before the tool calls
-    if (text) appendToolTextMsg(id, text);
+    // Show any text the model produced before the tool calls.
+    // When streaming, text was already rendered in the bubble — repurpose it.
+    if (text) {
+      if (result._bubble) {
+        // Convert streaming bubble to a simple pre-tool text display
+        result._bubble.className = 'message assistant-msg';
+        result._bubble.innerHTML = `<div class="msg-bubble tool-pretext">${escHtml(text)}</div>`;
+      } else {
+        appendToolTextMsg(id, text);
+      }
+    } else if (result._bubble) {
+      result._bubble.remove();   // no pre-tool text → discard the empty bubble
+    }
 
-    // Push assistant message in mode-appropriate format
+    // Push assistant message in mode-appropriate format.
+    // Heartbeat: accumulate in localMessages (same reference as callOpts.messages).
+    // Normal: persist to state.conversations.
     if (respMode === 'anthropic') {
       // content is an array of blocks (text + tool_use)
-      state.conversations[id].push({ _id: uid(), role: 'assistant', content: rawContent });
+      if (isHeartbeat) {
+        localMessages.push({ role: 'assistant', content: rawContent });
+      } else {
+        state.conversations[id].push({ _id: uid(), role: 'assistant', content: rawContent });
+      }
     } else {
       // OpenAI: assistant message carries tool_calls at top level
-      state.conversations[id].push({
-        _id: uid(), role: 'assistant',
-        content: text ?? null,
-        tool_calls: rawContent.tool_calls,
-      });
+      if (isHeartbeat) {
+        localMessages.push({ role: 'assistant', content: text ?? null, tool_calls: rawContent.tool_calls });
+      } else {
+        state.conversations[id].push({
+          _id: uid(), role: 'assistant',
+          content: text ?? null,
+          tool_calls: rawContent.tool_calls,
+        });
+      }
     }
 
     // Execute each tool call and collect results
@@ -1179,26 +1470,37 @@ async function sendToPersona(id) {
       toolResults.push({ id: tc.id, content: resultStr });
     }
 
-    // Push tool results in mode-appropriate format
+    // Push tool results in mode-appropriate format.
     if (respMode === 'anthropic') {
-      state.conversations[id].push({
-        _id: uid(), role: 'user',
+      const toolResultMsg = {
+        role: 'user',
         content: toolResults.map(r => ({
           type:        'tool_result',
           tool_use_id: r.id,
           content:     r.content,
         })),
-      });
+      };
+      if (isHeartbeat) {
+        localMessages.push(toolResultMsg);
+      } else {
+        state.conversations[id].push({ _id: uid(), ...toolResultMsg });
+      }
     } else {
       // OpenAI: one message per result
       for (const r of toolResults) {
-        state.conversations[id].push({ _id: uid(), role: 'tool', tool_call_id: r.id, content: r.content });
+        const toolMsg = { role: 'tool', tool_call_id: r.id, content: r.content };
+        if (isHeartbeat) {
+          localMessages.push(toolMsg);
+        } else {
+          state.conversations[id].push({ _id: uid(), ...toolMsg });
+        }
       }
     }
-    // Loop continues — next iteration sends the results back to the model
+    // Loop continues — next iteration sends the updated localMessages/conversations back
   }
 
   setThinking(id, false);
+  if (!isHeartbeat) state.lastActivity[id] = Date.now();
   updateContextCounter(id);
 }
 
@@ -1242,7 +1544,11 @@ function updateCwdDisplay() {
   }
 }
 
-async function callPersonaOnce(id, tools = [], integrations = undefined) {
+// opts = {} overrides for isolated calls (heartbeat):
+//   opts.messages            — use instead of state.conversations[id]
+//   opts.previousResponseId  — use instead of state.lastResponseId[id] (pass null/undefined for fresh)
+//   opts.store               — if false, send store:false to LM Studio v1
+async function callPersonaOnce(id, tools = [], integrations = undefined, opts = {}) {
   const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
   const model        = document.getElementById(`model-${id}`).value;
   const entityPrompt = (state.config[id].systemPrompt || '').trim();
@@ -1260,23 +1566,207 @@ async function callPersonaOnce(id, tools = [], integrations = undefined) {
   const apiKey = document.getElementById(`apikey-${id}`).value.trim()
     || document.getElementById('globalApiKey').value.trim();
 
-  const previousResponseId = state.lastResponseId[id] || undefined;
+  // Allow caller to override messages and previousResponseId for isolated calls.
+  const previousResponseId = ('previousResponseId' in opts)
+    ? opts.previousResponseId
+    : (state.lastResponseId[id] || undefined);
   // Strip the internal _id field — it's display/edit bookkeeping only and
   // must never reach any LLM API (would cause validation errors).
   // eslint-disable-next-line no-unused-vars
-  const messages = state.conversations[id].map(({ _id, ...m }) => m);
+  const messages = opts.messages !== undefined
+    ? opts.messages
+    : state.conversations[id].map(({ _id, ...m }) => m);
 
-  const response = await window.reef.invoke('llm.complete', {
-    endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
-    tools:        tools.length  ? tools        : undefined,
-    integrations: integrations  ? integrations : undefined,
-  });
+  // Acquire a global LLM call slot before sending — prevents all entities
+  // from hitting the server simultaneously (critical for local LM Studio).
+  await acquireLlmSlot();
+  let response;
+  try {
+    response = await window.reef.invoke('llm.complete', {
+      endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
+      tools:        tools.length  ? tools        : undefined,
+      integrations: integrations  ? integrations : undefined,
+      ...(opts.store === false ? { store: false } : {}),
+    });
+  } finally {
+    releaseLlmSlot();
+  }
 
   if (!response.ok) {
     appendError(id, response.error);
     return null;
   }
   return response.result;
+}
+
+// ─── Streaming single LLM call ────────────────────────────────────────────────
+// Like callPersonaOnce but streams tokens live into a bubble in the column.
+// Returns the same unified result shape + two extra fields:
+//   _bubble   — the DOM element created for the response (already in the column)
+// sendToPersona checks _bubble to skip creating a duplicate via appendAssistantMsg.
+
+// opts = {} overrides for isolated calls (heartbeat) — same keys as callPersonaOnce
+// plus opts.suppressResponseId (bool) to skip updating state.lastResponseId during stream.
+async function callPersonaStream(id, tools = [], integrations = undefined, opts = {}) {
+  const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
+  const model        = document.getElementById(`model-${id}`).value;
+  const entityPrompt = (state.config[id].systemPrompt || '').trim();
+  const basePrompt   = (state.config.settings.baseSystemPrompt || '').trim();
+
+  let systemPrompt = basePrompt ? basePrompt + '\n\n' + entityPrompt : entityPrompt;
+  const operatorSection  = buildOperatorSection();
+  const workspaceSection = buildWorkspaceSection();
+  if (operatorSection)  systemPrompt = systemPrompt + '\n\n' + operatorSection;
+  if (workspaceSection) systemPrompt = systemPrompt + '\n\n' + workspaceSection;
+
+  const apiKey = document.getElementById(`apikey-${id}`).value.trim()
+    || document.getElementById('globalApiKey').value.trim();
+
+  // Allow caller to override messages and previousResponseId for isolated calls.
+  const previousResponseId = ('previousResponseId' in opts)
+    ? opts.previousResponseId
+    : (state.lastResponseId[id] || undefined);
+  // eslint-disable-next-line no-unused-vars
+  const messages = opts.messages !== undefined
+    ? opts.messages
+    : state.conversations[id].map(({ _id, ...m }) => m);
+
+  const streamId = `stream_${id}_${Date.now()}`;
+
+  // ── Create the live streaming bubble ──────────────────────────────────────
+  // Inserted before the thinking indicator (if present) so the order is correct.
+  const msgs = document.getElementById(`msgs-${id}`);
+  const bubble = document.createElement('div');
+  bubble.className = 'message assistant-msg streaming-bubble';
+  bubble.innerHTML = `
+    <div class="stream-reasoning-wrap" style="display:none">
+      <div class="stream-reasoning-hdr">▸ REASONING</div>
+      <div class="stream-reasoning-body"></div>
+    </div>
+    <div class="stream-tool-strip" style="display:none"></div>
+    <div class="stream-text-wrap">
+      <span class="stream-text"></span><span class="stream-cursor">▌</span>
+    </div>`;
+
+  const thinkInd = document.getElementById(`thinking-${id}`);
+  if (thinkInd) msgs.insertBefore(bubble, thinkInd);
+  else          msgs.appendChild(bubble);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  const streamTextEl     = bubble.querySelector('.stream-text');
+  const streamReasonEl   = bubble.querySelector('.stream-reasoning-body');
+  const streamReasonWrap = bubble.querySelector('.stream-reasoning-wrap');
+  const streamToolStrip  = bubble.querySelector('.stream-tool-strip');
+  let accText      = '';
+  let accReasoning = '';
+
+  // ── Register stream event listener ────────────────────────────────────────
+  const removeListener = window.reef.onStreamEvent((evtId, chunk) => {
+    if (evtId !== streamId) return;
+    switch (chunk.type) {
+      case 'text':
+        accText += chunk.delta;
+        if (streamTextEl) {
+          streamTextEl.textContent = accText;
+          msgs.scrollTop = msgs.scrollHeight;
+        }
+        break;
+      case 'reasoning':
+        accReasoning += chunk.delta;
+        if (streamReasonWrap.style.display === 'none') {
+          streamReasonWrap.style.display = '';
+        }
+        if (streamReasonEl) streamReasonEl.textContent = accReasoning;
+        break;
+      case 'tool_start':
+        // Show which server-side tool is being called (LM Studio v1 MCP tools)
+        if (streamToolStrip && chunk.name) {
+          streamToolStrip.style.display = '';
+          streamToolStrip.textContent = `▶ ${chunk.name}…`;
+        }
+        break;
+      case 'stats':
+        // Suppress for isolated calls (heartbeat) — don't overwrite context counter tokens
+        if (chunk.inputTokens != null && !opts.suppressStats) {
+          state.lastTokens[id] = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens ?? null };
+        }
+        break;
+      case 'response_id':
+        // Suppress for isolated calls (heartbeat) — don't chain heartbeat into the conversation
+        if (!opts.suppressResponseId) state.lastResponseId[id] = chunk.id;
+        break;
+    }
+  });
+
+  // ── Start stream and await completion ─────────────────────────────────────
+  // Acquire the LLM slot for the full stream duration so other entities wait
+  // their turn rather than sending concurrent requests to the same server.
+  await acquireLlmSlot();
+  let response;
+  try {
+    response = await window.reef.streamLLM(streamId, {
+      endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
+      tools:        tools.length  ? tools        : undefined,
+      integrations: integrations  ? integrations : undefined,
+      ...(opts.store === false ? { store: false } : {}),
+    });
+  } finally {
+    releaseLlmSlot();
+  }
+
+  removeListener();
+
+  if (!response.ok) {
+    bubble.remove();
+    appendError(id, response.error);
+    return null;
+  }
+
+  // Attach bubble reference so sendToPersona can finalise it in-place
+  const result = response.result;
+  result._bubble = bubble;
+  return result;
+}
+
+// ─── Finalize a streaming bubble ─────────────────────────────────────────────
+// Replaces the raw streaming content with the properly formatted final version.
+// Returns the bubble element (same div) so callers can tag it with data-*.
+
+function finalizeStreamingBubble(bubble, text, reasoning, stats) {
+  let reasoningHtml = '';
+  if (reasoning) {
+    const ruid = `r-${Date.now()}`;
+    // Start open — the user watched reasoning stream live, so keep it visible
+    reasoningHtml = `
+      <div class="reasoning-block open" id="${ruid}">
+        <button class="reasoning-toggle" data-block-toggle="${ruid}">
+          <span class="reasoning-arrow">▸</span> REASONING
+        </button>
+        <div class="reasoning-body">${escHtml(String(reasoning))}</div>
+      </div>`;
+  }
+
+  let metaExtra = '';
+  if (stats) {
+    const tps  = stats.tokens_per_second           != null ? `${stats.tokens_per_second.toFixed(1)} tok/s` : null;
+    const ttft = stats.time_to_first_token_seconds != null ? `${stats.time_to_first_token_seconds.toFixed(2)}s TTFT` : null;
+    const parts = [tps, ttft].filter(Boolean);
+    if (parts.length) metaExtra = ` · ${parts.join(' · ')}`;
+  }
+
+  bubble.className = 'message assistant-msg';
+  bubble.innerHTML = `
+    ${reasoningHtml}
+    <div class="msg-bubble">${formatMd(escHtml(text))}</div>
+    <div class="msg-meta-row">
+      <span class="msg-meta">${timestamp()}${escHtml(metaExtra)}</span>
+      <span class="msg-actions">
+        <button class="msg-edit-btn" title="Edit">✎</button>
+        <button class="msg-delete-btn" title="Remove from context">×</button>
+      </span>
+    </div>
+  `;
+  return bubble;
 }
 
 // ─── Tool executor ────────────────────────────────────────────────────────────
@@ -1490,11 +1980,30 @@ function appendError(id, msg) {
 
 function setThinking(id, thinking) {
   state.thinking[id] = thinking;
-  const dot = document.getElementById(`dot-${id}`);
-  const msgs = document.getElementById(`msgs-${id}`);
+  const dot     = document.getElementById(`dot-${id}`);
+  const msgs    = document.getElementById(`msgs-${id}`);
+  const stopBtn = document.getElementById(`stop-${id}`);
+
+  // Always clear any existing timer first — whether starting or stopping.
+  if (thinkingTimers[id]) {
+    clearTimeout(thinkingTimers[id]);
+    thinkingTimers[id] = null;
+  }
 
   if (thinking) {
     dot.className = 'status-dot thinking';
+
+    // Wall-clock timeout — aborts the tool loop after N seconds.
+    const maxSecs = state.config.settings?.maxThinkingTime ?? 120;
+    if (maxSecs > 0) {
+      thinkingTimers[id] = setTimeout(() => {
+        if (state.thinking[id]) abortPersona(id, '⏱ TIMED OUT');
+      }, maxSecs * 1000);
+    }
+
+    // Show ✕ STOP button while thinking
+    if (stopBtn) stopBtn.style.display = '';
+
     const indicator = document.createElement('div');
     indicator.className = 'message assistant-msg';
     indicator.id = `thinking-${id}`;
@@ -1507,6 +2016,7 @@ function setThinking(id, thinking) {
     msgs.scrollTop = msgs.scrollHeight;
   } else {
     dot.className = 'status-dot online';
+    if (stopBtn) stopBtn.style.display = 'none';
     const ind = document.getElementById(`thinking-${id}`);
     if (ind) ind.remove();
   }
@@ -1533,9 +2043,16 @@ async function wakePersona(id) {
   msgs.appendChild(wakeEl);
   msgs.scrollTop = msgs.scrollHeight;
 
+  // Reserve 30 % of the configured context window for memories.
+  // For the 4096 default that's ~1228 tokens — enough for 2–3 typical
+  // memories or 1 large archival entry, leaving the rest for the system
+  // prompt, conversation history, and response headroom.
+  const memBudget = Math.floor(getContextWindow() * 0.30);
+
   const result = await window.reef.invoke('memory.wakeup', {
-    persona: personaName.toLowerCase(),
-    limit: 10,
+    persona:     personaName.toLowerCase(),
+    limit:       10,
+    tokenBudget: memBudget,
   });
 
   const indicator = document.getElementById(`waking-${id}`);
@@ -2022,6 +2539,7 @@ async function init() {
   document.getElementById('openMemoryBrowser').onclick = () => window.reef.openWindow('memory-browser');
   document.getElementById('openMessages').onclick      = () => window.reef.openWindow('messages');
   document.getElementById('openArchive').onclick       = () => window.reef.openWindow('archive');
+  document.getElementById('openVisualizer').onclick    = () => window.reef.openWindow('visualizer');
 
   const saved = await window.reef.loadConfig();
   if (saved && saved.ok) applyConfig(saved.result);

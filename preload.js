@@ -25,6 +25,18 @@ contextBridge.exposeInMainWorld('reef', {
     ipcRenderer.on('config:updated', (_event, cfg) => cb(cfg));
   },
 
+  // ─── Streaming LLM ────────────────────────────────────────────────────────────
+  // streamLLM(streamId, args) — start a streaming call; resolves with the full
+  //   result once the stream is complete (same shape as llm.complete result).
+  // onStreamEvent(cb) — register a listener for normalised stream chunks.
+  //   Returns a cleanup function: call it to stop receiving events when done.
+  streamLLM: (streamId, args) => ipcRenderer.invoke('llm:stream:start', streamId, args),
+  onStreamEvent: (cb) => {
+    const handler = (_event, streamId, chunk) => cb(streamId, chunk);
+    ipcRenderer.on('llm:stream:event', handler);
+    return () => ipcRenderer.removeListener('llm:stream:event', handler);
+  },
+
   // ─── Confirmation bridge (main → renderer → main) ──────────────────────────
   // Renderer registers a handler; main sends 'confirm:request' events.
   onConfirmRequest: (cb) => {

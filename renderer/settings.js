@@ -63,7 +63,13 @@ function scheduleSave() {
 }
 
 async function save() {
-  const cfg = { ...loadedCfg, settings: buildSettings() };
+  // Reload the latest full config from disk before merging in new settings.
+  // This ensures we don't overwrite A/B/C persona configs that may have changed
+  // in the main renderer window since the settings window was opened.
+  const fresh = await window.reef.loadConfig();
+  const base  = (fresh?.ok ? fresh.result : fresh) ?? loadedCfg;
+  const cfg   = { ...base, settings: buildSettings() };
+  loadedCfg   = cfg;   // keep our local copy current
   await window.reef.saveConfig(cfg);
 }
 
@@ -80,6 +86,10 @@ function buildSettings() {
     operatorBirthdate: val('sOperatorBirthdate'),
     operatorAbout:     val('sOperatorAbout'),
     heartbeatInterval: Math.max(5, parseInt(val('sHeartbeatInterval'), 10) || 60),
+    contextWindow:     Math.max(512, parseInt(val('sContextWindow'),   10) || 4096),
+    maxToolSteps:      Math.min(20, Math.max(1, parseInt(val('sMaxToolSteps'),   10) || 5)),
+    maxThinkingTime:   Math.max(0,             parseInt(val('sMaxThinkingTime'), 10) ?? 120),
+    streamChat:        document.getElementById('sStreamChat')?.checked ?? false,
     toolStates:        s.toolStates  || {},
     customTools:       s.customTools || [],
     cwd:               s.cwd         || null,
@@ -95,6 +105,9 @@ function populate(cfg) {
   set('sColonyName',        s.colonyName        || '');
   set('sBasePrompt',        s.baseSystemPrompt  || '');
   set('sHeartbeatInterval', s.heartbeatInterval || 60);
+  set('sContextWindow',     s.contextWindow     || 4096);
+  set('sMaxToolSteps',      s.maxToolSteps      ?? 5);
+  set('sMaxThinkingTime',   s.maxThinkingTime   ?? 120);
   set('sReefUrl',           s.reefUrl           || '');
   set('sReefApiKey',        s.reefApiKey        || '');
   set('sOperatorName',      s.operatorName      || '');
@@ -102,6 +115,7 @@ function populate(cfg) {
   set('sOperatorAbout',     s.operatorAbout     || '');
   setFontScale(s.fontScale  || 100);
   buildColorPalette(s.fontColors || 'cool');
+  setStreamChat(s.streamChat ?? false);
   buildToolsList();
 }
 
@@ -109,6 +123,23 @@ function set(id, value) {
   const el = document.getElementById(id);
   if (el) el.value = value;
 }
+
+// ─── Stream chat toggle ───────────────────────────────────────────────────────
+
+function setStreamChat(enabled) {
+  const el    = document.getElementById('sStreamChat');
+  const label = document.getElementById('sStreamChatLabel');
+  if (el) el.checked = !!enabled;
+  if (label) label.textContent = enabled ? 'ON' : 'OFF';
+}
+
+document.getElementById('sStreamChat')?.addEventListener('change', e => {
+  if (!loadedCfg.settings) loadedCfg.settings = {};
+  loadedCfg.settings.streamChat = e.target.checked;
+  const label = document.getElementById('sStreamChatLabel');
+  if (label) label.textContent = e.target.checked ? 'ON' : 'OFF';
+  scheduleSave();
+});
 
 // ─── Font scale ───────────────────────────────────────────────────────────────
 
@@ -280,7 +311,9 @@ function esc(str) {
 
 async function init() {
   const result = await window.reef.loadConfig();
-  loadedCfg = result || {};
+  // window.reef.loadConfig() returns { ok, result } from the IPC skill runner.
+  // Unwrap to get the actual config object (or fall back to empty).
+  loadedCfg = (result?.ok ? result.result : result) ?? {};
   populate(loadedCfg);
 }
 

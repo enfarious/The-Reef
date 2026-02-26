@@ -117,7 +117,7 @@ async function search(args) {
 // Formatted as a context block ready to inject into a system prompt.
 
 async function wakeup(args) {
-  const { persona, limit = 10 } = args;
+  const { persona, limit = 10, tokenBudget = null } = args;
   const name = normalizePersona(persona);
 
   // Own recent memories (any type)
@@ -211,9 +211,32 @@ async function wakeup(args) {
   // Primary memories first (own + archival by recency), linked appended after
   const allWithLinked = [...all, ...linked];
 
+  // ── Token budget trimming ────────────────────────────────────────────────
+  // If a tokenBudget is provided (caller passes ~30 % of their context window),
+  // include memories greedily in priority order until the budget is spent.
+  // We always include at least one memory so a single oversized entry doesn't
+  // silently leave the entity memory-less.
+  // Estimate: (body + title + subject) chars / 4  +  80-char header overhead.
+  let finalMemories = allWithLinked;
+  if (tokenBudget != null && tokenBudget > 0) {
+    const trimmed  = [];
+    let   used     = 0;
+    for (const m of allWithLinked) {
+      const chars = (m.body    || '').length
+                  + (m.title   || '').length
+                  + (m.subject || '').length
+                  + 80;                          // header + separators
+      const est   = Math.ceil(chars / 4);
+      if (trimmed.length > 0 && used + est > tokenBudget) break;
+      trimmed.push(m);
+      used += est;
+    }
+    finalMemories = trimmed;
+  }
+
   return {
-    memories: allWithLinked,
-    contextBlock: formatMemoryBlock(allWithLinked),
+    memories:     finalMemories,
+    contextBlock: formatMemoryBlock(finalMemories),
   };
 }
 
@@ -317,4 +340,83 @@ async function link(args) {
   return rows[0];
 }
 
-module.exports = { save, search, wakeup, list, update, link };
+// ─── graph ─────────────────────────────────────────────────────────────────────
+// Returns all memories + all memory_links for graph visualisation.
+// No filtering — the visualiser handles that on the frontend.
+// args: { limit }
+
+async function graph(args) {
+  const { limit = 400 } = args ?? {};
+
+  const { rows: nodes } = await pool.query(
+    `SELECT id, left_by, type, title, slug, subject, body, tags,
+            created_at, posted_to_reef, reef_entry_id
+     FROM memories
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+
+  const ids = nodes.map(n => n.id);
+  let links = [];
+
+  if (ids.length) {
+    const { rows } = await pool.query(
+      `SELECT from_id, to_id, relationship, strength, created_by
+       FROM memory_links
+       WHERE from_id = ANY($1::int[]) OR to_id = ANY($1::int[])`,
+      [ids]
+    );
+    links = rows;
+  }
+
+  return { nodes, links };
+}
+
+// ─── monitor ───────────────────────────────────────────────────────────────────
+// Colony-wide memory ecology stats.
+// args: {}
+
+async function monitor(_args) {
+  const [
+    { rows: totals },
+    { rows: byType },
+    { rows: byPersona },
+    { rows: linkTotals },
+    { rows: recentActivity },
+    { rows: topTags },
+  ] = await Promise.all([
+    pool.query(`SELECT
+      COUNT(*)::int AS total_memories,
+      COUNT(*) FILTER (WHERE posted_to_reef = true)::int AS posted_to_reef
+    FROM memories`),
+    pool.query(`SELECT type, COUNT(*)::int AS count
+      FROM memories GROUP BY type ORDER BY count DESC`),
+    pool.query(`SELECT left_by, COUNT(*)::int AS count
+      FROM memories GROUP BY left_by ORDER BY count DESC`),
+    pool.query(`SELECT
+      COUNT(*)::int AS total_links,
+      COUNT(*) FILTER (WHERE strength >= 0.7)::int AS strong_links
+    FROM memory_links`),
+    pool.query(`SELECT DATE(created_at) AS day, COUNT(*)::int AS count
+      FROM memories
+      WHERE created_at > NOW() - INTERVAL '30 days'
+      GROUP BY day ORDER BY day DESC LIMIT 14`),
+    pool.query(`SELECT unnest(tags) AS tag, COUNT(*)::int AS count
+      FROM memories WHERE tags IS NOT NULL AND cardinality(tags) > 0
+      GROUP BY tag ORDER BY count DESC LIMIT 20`),
+  ]);
+
+  return {
+    total_memories:  totals[0].total_memories,
+    posted_to_reef:  totals[0].posted_to_reef,
+    by_type:         byType,
+    by_persona:      byPersona,
+    total_links:     linkTotals[0].total_links,
+    strong_links:    linkTotals[0].strong_links,
+    recent_activity: recentActivity,
+    top_tags:        topTags,
+  };
+}
+
+module.exports = { save, search, wakeup, list, update, link, graph, monitor };

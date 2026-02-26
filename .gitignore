@@ -136,9 +136,12 @@ dist
 .pnp.*
 .claude
 agents
-/db.config.json
-/REEF_BUILD.md
-/reef-colony.html
+
+secrets.json
+config.json
+db.config.json
+REEF_BUILD.md
+reef-colony.html
 package-lock.json
 docs/TheReef_Documented_Website_API.md
 /sql

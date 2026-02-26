@@ -149,6 +149,58 @@
   opacity: 0.7;
 }
 
+/* ─── Toggle switch ──────────────────────────────────────────────────────── */
+
+.sw-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sw-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.sw-toggle-track {
+  display: block;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border);
+  transition: background 0.2s, border-color 0.2s;
+  position: relative;
+}
+.sw-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.2s, background 0.2s;
+}
+.sw-toggle input:checked + .sw-toggle-track {
+  background: rgba(0, 229, 200, 0.2);
+  border-color: rgba(0, 229, 200, 0.5);
+}
+.sw-toggle input:checked + .sw-toggle-track::after {
+  transform: translateX(16px);
+  background: var(--accent, #00e5c8);
+}
+.sw-toggle-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  min-width: 24px;
+}
+
 /* ─── Font scale range ────────────────────────────────────────────────────── */
 
 .sw-scale-val {

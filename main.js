@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 const skills    = require('./skills/index');
+const llm       = require('./skills/llm');
 const db        = require('./skills/db');
 const config    = require('./skills/config');
 const mcpServer = require('./skills/mcp-server');
@@ -256,6 +257,7 @@ ipcMain.handle('window:open', (_event, type) => {
     'messages':       { width:  960, height: 700, title: 'THE REEF — COLONY MESSAGES' },
     'archive':        { width:  960, height: 650, title: 'THE REEF — ARCHIVE'         },
     'settings':       { width:  820, height: 640, title: 'THE REEF — SETTINGS'        },
+    'visualizer':     { width: 1280, height: 820, title: 'THE REEF — MEMORY GRAPH'    },
   };
   const cfg = configs[type];
   if (!cfg) return { ok: false, error: `Unknown window type: ${type}` };
@@ -276,6 +278,28 @@ ipcMain.handle('window:open', (_event, type) => {
   win.setMenu(null);
   win.loadFile(path.join(__dirname, 'renderer', `${type}.html`));
   return { ok: true };
+});
+
+// ─── IPC: streaming LLM ───────────────────────────────────────────────────────
+// Starts an SSE stream for the given args.  Pushes normalised chunk events to
+// the requesting window via 'llm:stream:event' while the stream is running,
+// then resolves the invoke with the final unified result (or an error object).
+//
+// The renderer registers a listener for 'llm:stream:event' before calling this
+// handler so it can process live chunks while awaiting the invoke result.
+
+ipcMain.handle('llm:stream:start', async (event, streamId, args) => {
+  try {
+    const result = await llm.stream(args, (chunk) => {
+      // Guard: window may have been closed before the stream finishes
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('llm:stream:event', streamId, chunk);
+      }
+    });
+    return { ok: true, result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // ─── IPC: confirmation bridge ─────────────────────────────────────────────────
