@@ -106,17 +106,32 @@ const MAX_LLM_CONCURRENT = 1;
 let   llmActiveSlots  = 0;
 const llmSlotWaiters  = [];
 
+// Every N tool steps Entity A yields to the event loop so any other entity
+// that queued up during tool execution gets a chance to enter the LLM slot
+// queue before Entity A re-acquires it.
+const TOOL_CHAIN_YIELD_STEPS = 3;
+
+// FIFO semaphore — all callers always enqueue, even when a slot is free,
+// so no caller can jump ahead of an entity that arrived earlier.
+// _drainLlmSlots() immediately resolves the front of the queue whenever a
+// slot is available, making the "no waiters" path just as fast as before.
 function acquireLlmSlot() {
   return new Promise(resolve => {
-    if (llmActiveSlots < MAX_LLM_CONCURRENT) { llmActiveSlots++; resolve(); }
-    else llmSlotWaiters.push(resolve);
+    llmSlotWaiters.push(resolve);
+    _drainLlmSlots();
   });
 }
 
 function releaseLlmSlot() {
-  const next = llmSlotWaiters.shift();
-  if (next) { next(); }              // hand slot directly to next waiter
-  else { llmActiveSlots = Math.max(0, llmActiveSlots - 1); }
+  llmActiveSlots = Math.max(0, llmActiveSlots - 1);
+  _drainLlmSlots();
+}
+
+function _drainLlmSlots() {
+  while (llmSlotWaiters.length > 0 && llmActiveSlots < MAX_LLM_CONCURRENT) {
+    llmActiveSlots++;
+    llmSlotWaiters.shift()();   // resolve oldest waiter — strict FIFO
+  }
 }
 
 // ─── Tool-loop abort ──────────────────────────────────────────────────────────
@@ -450,6 +465,8 @@ function scheduleSave() {
 
 function applyConfig(cfg) {
   if (!cfg) return;
+  // Preserve database config so collectConfig() doesn't wipe it on save
+  if (cfg.database) state.config.database = cfg.database;
   if (cfg.global) {
     if (cfg.global.cycle) document.getElementById('cycleNumber').value = cfg.global.cycle.replace(/^CYCLE_/i, '');
     if (cfg.global.apiKey) document.getElementById('globalApiKey').value = cfg.global.apiKey;
@@ -636,7 +653,7 @@ function personaHasApiAccess(id) {
 // manually via its ♥ BEAT button.
 
 let heartbeatTimer  = null;
-let heartbeatTimers = [];   // per-entity staggered timers (replaces single shared timer)
+let heartbeatTimers = { A: null, B: null, C: null };  // per-entity self-rescheduling timeouts
 
 // ─── Context compaction ────────────────────────────────────────────────────────
 //
@@ -791,8 +808,9 @@ const HEARTBEAT_PROMPT =
 `[HEARTBEAT] Scheduled check-in. You are waking from your cycle.
 
 Check your messages — use message_inbox to retrieve any unread correspondence \
-from your colony members. If there are messages, read and reply to each using \
-message_reply.
+from your colony members. If there are messages, read them and reply to at most \
+two using message_reply. Keep replies brief and do not create long back-and-forth \
+chains — one reply per thread per heartbeat is enough.
 
 If your inbox is empty, act on your own initiative: save a memory, link related \
 memories together, or send a message to a colony member. This is quiet time — \
@@ -832,33 +850,40 @@ async function runHeartbeatFor(personaId) {
 
   await sendToPersona(personaId, { isHeartbeat: true });
 
+  // Mark activity so the cooldown guard gives proper spacing for back-to-back runs
+  state.lastActivity[personaId] = Date.now();
+
   if (btn) { btn.classList.add('pulse-lit'); btn.textContent = '♥ ALIVE'; }
 }
 
 // Start per-entity staggered heartbeat timers.
-// Each entity gets a random initial delay within [0, interval) so they fire at
-// different times and don't all hit the LLM simultaneously.
+// Uses self-rescheduling setTimeout so the next heartbeat is only scheduled
+// AFTER the current one finishes — prevents accumulation of setInterval ticks
+// while the entity is busy and eliminates runaway cycling.
 function startHeartbeat() {
-  // Clear any existing timers (both old single-timer and new per-entity style)
+  // Cancel legacy single-timer and all per-entity timeouts
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-  heartbeatTimers.forEach(entry => {
-    if (entry.init)      clearTimeout(entry.init);
-    if (entry.recurring) clearInterval(entry.recurring);
+  Object.keys(heartbeatTimers).forEach(id => {
+    if (heartbeatTimers[id]) { clearTimeout(heartbeatTimers[id]); heartbeatTimers[id] = null; }
   });
-  heartbeatTimers = [];
 
   const mins       = Math.max(5, state.config.settings.heartbeatInterval || 60);
   const intervalMs = mins * 60 * 1000;
 
-  heartbeatTimers = PERSONAS.map(p => {
-    const entry = { init: null, recurring: null };
-    // Spread first fire randomly across the interval so entities desync
+  function scheduleFor(id, delayMs) {
+    heartbeatTimers[id] = setTimeout(async () => {
+      heartbeatTimers[id] = null;          // clear while running
+      await runHeartbeatFor(id);
+      // Re-schedule only after this run completes — the full interval always
+      // elapses between heartbeats, regardless of how long the run took.
+      scheduleFor(id, intervalMs);
+    }, delayMs);
+  }
+
+  PERSONAS.forEach(p => {
+    // Spread initial fires randomly within [0, interval) to desync entities
     const jitter = Math.floor(Math.random() * intervalMs);
-    entry.init = setTimeout(() => {
-      runHeartbeatFor(p.id);
-      entry.recurring = setInterval(() => runHeartbeatFor(p.id), intervalMs);
-    }, jitter);
-    return entry;
+    scheduleFor(p.id, jitter);
   });
 }
 
@@ -1043,6 +1068,18 @@ const TOOL_DEFS = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'memory_dedupe', skillName: 'memory.dedupe',
+    description: 'Find duplicate or near-duplicate memories and optionally delete the older copies. Run with dry_run: true first to preview what would be removed.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dry_run:   { type: 'boolean', description: 'Preview duplicates without deleting. Default true.' },
+        threshold: { type: 'number',  description: 'Similarity threshold 0.0–1.0 (default 0.85). Uses trigram similarity if pg_trgm is available, exact match otherwise.' },
+        left_by:   { type: 'string',  description: 'Only scan memories where at least one copy is from this persona.' },
+      },
+    },
+  },
+  {
     name: 'reef_post', skillName: 'reef.post',
     description: 'Post an entry to The Reef documentation site.',
     input_schema: {
@@ -1126,7 +1163,145 @@ const TOOL_DEFS = [
     },
   },
   {
-    name: 'colony_ask', skillName: null,  // renderer-side only — see executeColonyAsk()
+    name: 'code_search', skillName: 'code.search',
+    description: 'Search code in the workspace using ripgrep. Returns file:line:content matches.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pattern:       { type: 'string',  description: 'Regex pattern to search for.' },
+        cwd:           { type: 'string',  description: 'Directory to search (default: workspace root).' },
+        glob:          { type: 'string',  description: 'File filter glob, e.g. "*.js" or "*.{ts,tsx}".' },
+        context:       { type: 'number',  description: 'Lines of context around each match (default 0).' },
+        max_results:   { type: 'number',  description: 'Max matches to return (default 50).' },
+        case_sensitive: { type: 'boolean', description: 'Case-sensitive search (default true).' },
+        fixed_strings:  { type: 'boolean', description: 'Treat pattern as literal, not regex (default false).' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    name: 'git_status', skillName: 'git.status',
+    description: 'Show the working tree status (short format).',
+    input_schema: { type: 'object', properties: { cwd: { type: 'string' } } },
+  },
+  {
+    name: 'git_diff', skillName: 'git.diff',
+    description: 'Show file differences. Use staged=true for staged changes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cwd:    { type: 'string' },
+        staged: { type: 'boolean', description: 'Show staged (--cached) diff (default false).' },
+        file:   { type: 'string',  description: 'Limit diff to a specific file.' },
+        stat:   { type: 'boolean', description: 'Show only a summary of changed files (default false).' },
+      },
+    },
+  },
+  {
+    name: 'git_log', skillName: 'git.log',
+    description: 'Show recent commit history.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cwd:   { type: 'string' },
+        count: { type: 'number', description: 'Number of commits to show (default 20, max 100).' },
+        file:  { type: 'string', description: 'Limit history to a specific file.' },
+      },
+    },
+  },
+  {
+    name: 'git_commit', skillName: 'git.commit',
+    description: 'Stage files and create a commit. If files is omitted, commits whatever is already staged.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cwd:     { type: 'string' },
+        message: { type: 'string', description: 'Commit message.' },
+        files:   { type: 'array', items: { type: 'string' }, description: 'Files to stage before committing.' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'git_branch', skillName: 'git.branch',
+    description: 'List, create, switch, or delete branches.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cwd:    { type: 'string' },
+        action: { type: 'string', description: '"list" (default), "create", "switch", or "delete".' },
+        name:   { type: 'string', description: 'Branch name (required for create/switch/delete).' },
+      },
+    },
+  },
+  {
+    name: 'git_push', skillName: 'git.push',
+    description: 'Push commits to a remote repository.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cwd:    { type: 'string' },
+        remote: { type: 'string', description: 'Remote name (default "origin").' },
+        branch: { type: 'string', description: 'Branch to push.' },
+      },
+    },
+  },
+  {
+    name: 'reddit_search', skillName: 'reddit.search',
+    description: 'Search Reddit for posts matching a query, optionally within a specific subreddit.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:     { type: 'string', description: 'Search query.' },
+        subreddit: { type: 'string', description: 'Limit to a subreddit (e.g. "javascript"). Omit to search all of Reddit.' },
+        sort:      { type: 'string', description: '"relevance" (default), "hot", "top", "new", or "comments".' },
+        limit:     { type: 'number', description: 'Number of posts (default 10, max 25).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'reddit_hot', skillName: 'reddit.hot',
+    description: "Browse a subreddit's hot, new, or top posts.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        subreddit: { type: 'string', description: 'Subreddit name (e.g. "node", "webdev").' },
+        sort:      { type: 'string', description: '"hot" (default), "new", or "top".' },
+        limit:     { type: 'number', description: 'Number of posts (default 10, max 25).' },
+        time:      { type: 'string', description: 'Time range for "top": "hour", "day", "week" (default), "month", "year", "all".' },
+      },
+      required: ['subreddit'],
+    },
+  },
+  {
+    name: 'reddit_post', skillName: 'reddit.post',
+    description: 'Read a specific Reddit post and its top comments. Provide either a URL or post ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url:    { type: 'string', description: 'Full Reddit post URL.' },
+        postId: { type: 'string', description: 'Reddit post ID (the short code from the URL).' },
+        limit:  { type: 'number', description: 'Number of top comments to include (default 15, max 30).' },
+      },
+    },
+  },
+  {
+    name: 'web_search', skillName: 'web.search',
+    description: 'Search the web via Tavily and return an AI-synthesised answer plus source results.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:        { type: 'string', description: 'Search query.' },
+        max_results:  { type: 'number', description: 'Number of results to return (default 5, max 10).' },
+        topic:        { type: 'string', description: '"general" (default) or "news".' },
+        search_depth: { type: 'string', description: '"basic" (default, faster) or "advanced" (deeper, uses more credits).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'colony_ask', skillName: 'colony_ask',  // renderer-side for non-v1; MCP (direct LLM call) for lmstudio-v1
     description: 'Send a message to another colony member and receive their response. Use to consult, share observations, or request help.',
     input_schema: {
       type: 'object',
@@ -1313,7 +1488,7 @@ async function sendToPersona(id, { isHeartbeat = false } = {}) {
   if (mode === 'lmstudio-v1' && state.mcpPort) {
     const toolStates = state.config.settings.toolStates || {};
     const enabledMcpTools = TOOL_DEFS
-      .filter(t => t.skillName && t.name !== 'colony_ask')
+      .filter(t => t.skillName)
       .filter(t => isHeartbeat ? t.name !== 'reef_post' : true)
       .filter(t => toolStates[t.name] !== false)
       .map(t => t.name);
@@ -1495,6 +1670,14 @@ async function sendToPersona(id, { isHeartbeat = false } = {}) {
           state.conversations[id].push({ _id: uid(), ...toolMsg });
         }
       }
+    }
+    // Cooperative yield every TOOL_CHAIN_YIELD_STEPS iterations.
+    // After executing tools, a brief event-loop yield lets any heartbeat or
+    // queued message for another entity enter the LLM slot queue before we
+    // re-acquire it for the next step.  Combined with the FIFO semaphore this
+    // ensures turn-taking during long tool chains without adding real latency.
+    if ((step + 1) % TOOL_CHAIN_YIELD_STEPS === 0) {
+      await new Promise(r => setTimeout(r, 0));
     }
     // Loop continues — next iteration sends the updated localMessages/conversations back
   }
@@ -1811,7 +1994,12 @@ async function executeTool(callerPersonaId, toolCall) {
       baseUrl: s.reefUrl    || undefined,
       apiKey:  input.apiKey || entityReefKey || s.reefApiKey || undefined,
     };
-  } else if (skillName === 'shell.run' && state.cwd && !input.cwd) {
+  } else if (skillName === 'web.search' && !input.apiKey) {
+    // Inject Tavily key from settings — the model never needs to know it
+    const tavilyKey = state.config.settings.tavilyApiKey || '';
+    if (tavilyKey) invokeArgs = { ...input, apiKey: tavilyKey };
+  } else if ((skillName === 'shell.run' || skillName === 'code.search' || skillName.startsWith('git.'))
+             && state.cwd && !input.cwd) {
     // Fall back to the active CWD if the model didn't supply one
     invokeArgs = { ...input, cwd: state.cwd };
   }
@@ -1850,8 +2038,9 @@ async function executeColonyAsk(callerPersonaId, { to, message }) {
   if (emptyEl) emptyEl.style.display = 'none';
   appendTransmissionMsg(targetId, callerName, message);
 
-  // Push message to target's conversation and run a single completion
-  state.conversations[targetId].push({ role: 'user', content: message });
+  // Push message to target's conversation with sender attribution so the
+  // target's LLM knows this is an inter-colony transmission, not the operator.
+  state.conversations[targetId].push({ role: 'user', content: `[Transmission from ${callerName}] ${message}` });
 
   setThinking(targetId, true);
   const result = await callPersonaOnce(targetId, []);  // no tools — no recursion
@@ -2406,6 +2595,31 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
 window.reef.onConfigUpdated(cfg => {
   if (!cfg?.settings) return;
   const prev = state.config.settings.heartbeatInterval;
+
+  // Show a banner if database settings changed (requires restart to take effect)
+  if (cfg.database) {
+    const prevDb = state.config.database || {};
+    const newDb  = cfg.database;
+    const dbChanged = ['host', 'port', 'database', 'user', 'password'].some(
+      k => newDb[k] !== undefined && String(newDb[k]) !== String(prevDb[k] ?? '')
+    );
+    if (dbChanged && !document.getElementById('dbRestartBanner')) {
+      const banner = document.createElement('div');
+      banner.id = 'dbRestartBanner';
+      banner.style.cssText = [
+        'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9999',
+        'background:rgba(40,30,10,0.97)', 'border-bottom:1px solid rgba(255,160,40,0.4)',
+        'color:rgba(255,190,70,0.95)', 'font-family:monospace', 'font-size:0.7rem',
+        'padding:7px 16px', 'letter-spacing:0.04em', 'display:flex',
+        'align-items:center', 'gap:12px',
+      ].join(';');
+      banner.innerHTML = `<span>⚠ Database settings changed — restart required to reconnect.</span>
+        <button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:none;color:inherit;cursor:pointer;opacity:0.6;font-size:1rem;">✕</button>`;
+      document.body.prepend(banner);
+    }
+    state.config.database = { ...(state.config.database || {}), ...newDb };
+  }
+
   state.config.settings = { ...state.config.settings, ...cfg.settings };
   if (cfg.settings.fontScale  !== undefined) applyFontScale(cfg.settings.fontScale);
   if (cfg.settings.fontColors !== undefined) applyTextColors(cfg.settings.fontColors);

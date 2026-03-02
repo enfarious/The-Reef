@@ -5,19 +5,44 @@ const fs = require('fs');
 const path = require('path');
 
 // ─── Connection config ─────────────────────────────────────────────────────────
-// Reads from db.config.json in project root (copy from db.config.example.json).
-// Falls back to environment variables, then localhost defaults.
+// Priority: userData reef-config.json database section → db.config.json → env → defaults.
+// loadDbConfig() is called inside init() so app.getPath('userData') is always available.
 
 function loadDbConfig() {
-  const cfgPath = path.join(__dirname, '..', 'db.config.json');
-  if (fs.existsSync(cfgPath)) {
+  // 1. userData/reef-config.json — user-configured DB settings (works in packaged app)
+  try {
+    const { app, safeStorage } = require('electron');
+    const userCfgPath = path.join(app.getPath('userData'), 'reef-config.json');
+    if (fs.existsSync(userCfgPath)) {
+      const raw = JSON.parse(fs.readFileSync(userCfgPath, 'utf8'));
+      if (raw.database && raw.database.host) {
+        const db = { ...raw.database };
+        // Decrypt password if it was encrypted by safeStorage
+        if (typeof db.password === 'string' && db.password.startsWith('enc:')) {
+          try {
+            if (safeStorage.isEncryptionAvailable()) {
+              db.password = safeStorage.decryptString(Buffer.from(db.password.slice(4), 'base64'));
+            }
+          } catch { /* keep as-is */ }
+        }
+        console.log('[db] Using database config from userData');
+        return db;
+      }
+    }
+  } catch { /* app not ready or parse error — fall through */ }
+
+  // 2. Dev fallback: db.config.json next to main.js (excluded from packaged builds)
+  const devCfgPath = path.join(__dirname, '..', 'db.config.json');
+  if (fs.existsSync(devCfgPath)) {
     try {
-      const raw = fs.readFileSync(cfgPath, 'utf8');
-      return JSON.parse(raw);
+      console.log('[db] Using db.config.json');
+      return JSON.parse(fs.readFileSync(devCfgPath, 'utf8'));
     } catch (e) {
       console.error('[db] Failed to parse db.config.json:', e.message);
     }
   }
+
+  // 3. Environment variables / defaults
   return {
     host:     process.env.DB_HOST     || 'localhost',
     port:     parseInt(process.env.DB_PORT || '5432', 10),
@@ -27,10 +52,18 @@ function loadDbConfig() {
   };
 }
 
-const pool = new Pool(loadDbConfig());
+// ─── Pool proxy ────────────────────────────────────────────────────────────────
+// Stable module-level export — safe to import before app.ready.
+// The real pg.Pool is created inside init() once app.getPath('userData') is available.
 
-pool.on('error', (err) => {
-  console.error('[db] Unexpected pool error:', err.message);
+let _pool = null;
+
+const pool = new Proxy({}, {
+  get(_, prop) {
+    if (!_pool) throw new Error('[db] Pool not initialized — call db.init() first');
+    const v = _pool[prop];
+    return typeof v === 'function' ? v.bind(_pool) : v;
+  },
 });
 
 // ─── Schema sections ───────────────────────────────────────────────────────────
@@ -162,6 +195,11 @@ async function runSection(client, label, sql) {
 }
 
 async function init() {
+  _pool = new Pool(loadDbConfig());
+  _pool.on('error', (err) => {
+    console.error('[db] Unexpected pool error:', err.message);
+  });
+
   const client = await pool.connect();
   try {
     // 1. pg_trgm extension — may need superuser; non-fatal if unavailable

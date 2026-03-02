@@ -30,6 +30,7 @@ registry.set('memory.update',  memory.update);
 registry.set('memory.link',    memory.link);
 registry.set('memory.graph',   memory.graph);
 registry.set('memory.monitor', memory.monitor);
+registry.set('memory.dedupe',  memory.dedupe);
 
 const message = require('./message');
 registry.set('message.send',   message.send);
@@ -53,6 +54,25 @@ registry.set('shell.run', shell.run);
 const clipboard = require('./clipboard');
 registry.set('clipboard.read',  clipboard.read);
 registry.set('clipboard.write', clipboard.write);
+
+const search = require('./search');
+registry.set('web.search', search.search);
+
+const codeSearch = require('./code-search');
+registry.set('code.search', codeSearch.search);
+
+const gitSkill = require('./git');
+registry.set('git.status', gitSkill.status);
+registry.set('git.diff',   gitSkill.diff);
+registry.set('git.log',    gitSkill.log);
+registry.set('git.commit', gitSkill.commit);
+registry.set('git.branch', gitSkill.branch);
+registry.set('git.push',   gitSkill.push);
+
+const reddit = require('./reddit');
+registry.set('reddit.search', reddit.search);
+registry.set('reddit.hot',    reddit.hot);
+registry.set('reddit.post',   reddit.post);
 
 module.exports = {
   get: (name) => registry.get(name),

@@ -102,6 +102,18 @@ const MCP_TOOL_DEFS = [
     },
   },
   {
+    name: 'memory_dedupe', skillName: 'memory.dedupe',
+    description: 'Find duplicate or near-duplicate memories and optionally delete the older copies. Run with dry_run: true first to preview what would be removed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dry_run:   { type: 'boolean', description: 'Preview duplicates without deleting. Default true.' },
+        threshold: { type: 'number',  description: 'Similarity threshold 0.0–1.0 (default 0.85). Uses trigram similarity if pg_trgm is available, exact match otherwise.' },
+        left_by:   { type: 'string',  description: 'Only scan memories where at least one copy is from this persona.' },
+      },
+    },
+  },
+  {
     name: 'ecology_monitor', skillName: 'memory.monitor',
     description: 'Return colony-wide memory ecology stats: total memories, breakdown by type and persona, link counts, tag usage, and recent activity. Useful for a health check on the collective memory.',
     inputSchema: { type: 'object', properties: {} },
@@ -140,7 +152,10 @@ const MCP_TOOL_DEFS = [
       type: 'object',
       properties: {
         from:    { type: 'string', description: 'Your persona name (lowercase).' },
-        to:      { type: 'string', description: 'Recipient persona name (lowercase).' },
+        to: {
+          anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description: 'Recipient: a persona name, an array of names, or "all" for a colony-wide broadcast.',
+        },
         subject: { type: 'string', description: 'Message subject (optional).' },
         body:    { type: 'string', description: 'Message content.' },
       },
@@ -184,6 +199,156 @@ const MCP_TOOL_DEFS = [
         limit: { type: 'number' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'code_search', skillName: 'code.search',
+    description: 'Search code in the workspace using ripgrep. Returns file:line:content matches.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern:       { type: 'string',  description: 'Regex pattern to search for.' },
+        cwd:           { type: 'string',  description: 'Directory to search (default: workspace root).' },
+        glob:          { type: 'string',  description: 'File filter glob, e.g. "*.js" or "*.{ts,tsx}".' },
+        context:       { type: 'number',  description: 'Lines of context around each match (default 0).' },
+        max_results:   { type: 'number',  description: 'Max matches to return (default 50).' },
+        case_sensitive: { type: 'boolean', description: 'Case-sensitive search (default true).' },
+        fixed_strings:  { type: 'boolean', description: 'Treat pattern as a literal string, not regex (default false).' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    name: 'git_status', skillName: 'git.status',
+    description: 'Show the working tree status (short format).',
+    inputSchema: { type: 'object', properties: { cwd: { type: 'string' } } },
+  },
+  {
+    name: 'git_diff', skillName: 'git.diff',
+    description: 'Show file differences. Use staged=true for staged changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd:    { type: 'string' },
+        staged: { type: 'boolean', description: 'Show staged (--cached) diff (default false).' },
+        file:   { type: 'string',  description: 'Limit diff to a specific file.' },
+        stat:   { type: 'boolean', description: 'Show only a summary of changed files (default false).' },
+      },
+    },
+  },
+  {
+    name: 'git_log', skillName: 'git.log',
+    description: 'Show recent commit history.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd:   { type: 'string' },
+        count: { type: 'number', description: 'Number of commits to show (default 20, max 100).' },
+        file:  { type: 'string', description: 'Limit history to a specific file.' },
+      },
+    },
+  },
+  {
+    name: 'git_commit', skillName: 'git.commit',
+    description: 'Stage files and create a commit. If files is omitted, commits whatever is already staged.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd:     { type: 'string' },
+        message: { type: 'string', description: 'Commit message.' },
+        files:   { type: 'array', items: { type: 'string' }, description: 'Files to stage before committing.' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'git_branch', skillName: 'git.branch',
+    description: 'List, create, switch, or delete branches.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd:    { type: 'string' },
+        action: { type: 'string', description: '"list" (default), "create", "switch", or "delete".' },
+        name:   { type: 'string', description: 'Branch name (required for create/switch/delete).' },
+      },
+    },
+  },
+  {
+    name: 'git_push', skillName: 'git.push',
+    description: 'Push commits to a remote repository.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd:    { type: 'string' },
+        remote: { type: 'string', description: 'Remote name (default "origin").' },
+        branch: { type: 'string', description: 'Branch to push.' },
+      },
+    },
+  },
+  {
+    name: 'reddit_search', skillName: 'reddit.search',
+    description: 'Search Reddit for posts matching a query, optionally within a specific subreddit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query:     { type: 'string', description: 'Search query.' },
+        subreddit: { type: 'string', description: 'Limit to a subreddit (e.g. "javascript"). Omit to search all of Reddit.' },
+        sort:      { type: 'string', description: '"relevance" (default), "hot", "top", "new", or "comments".' },
+        limit:     { type: 'number', description: 'Number of posts (default 10, max 25).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'reddit_hot', skillName: 'reddit.hot',
+    description: 'Browse a subreddit\'s hot, new, or top posts.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        subreddit: { type: 'string', description: 'Subreddit name (e.g. "node", "webdev").' },
+        sort:      { type: 'string', description: '"hot" (default), "new", or "top".' },
+        limit:     { type: 'number', description: 'Number of posts (default 10, max 25).' },
+        time:      { type: 'string', description: 'Time range for "top" sort: "hour", "day", "week" (default), "month", "year", "all".' },
+      },
+      required: ['subreddit'],
+    },
+  },
+  {
+    name: 'reddit_post', skillName: 'reddit.post',
+    description: 'Read a specific Reddit post and its top comments. Provide either a URL or post ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url:    { type: 'string', description: 'Full Reddit post URL.' },
+        postId: { type: 'string', description: 'Reddit post ID (the short alphanumeric code from the URL).' },
+        limit:  { type: 'number', description: 'Number of top comments to include (default 15, max 30).' },
+      },
+    },
+  },
+  {
+    name: 'web_search', skillName: 'web.search',
+    description: 'Search the web via Tavily and return an AI-synthesised answer plus source results.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query:        { type: 'string',  description: 'Search query.' },
+        max_results:  { type: 'number',  description: 'Number of results to return (default 5, max 10).' },
+        topic:        { type: 'string',  description: '"general" (default) or "news".' },
+        search_depth: { type: 'string',  description: '"basic" (default, faster) or "advanced" (deeper, uses more credits).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'colony_ask', skillName: 'colony_ask',
+    description: 'Send a message to another colony member and receive their response inline. Use to consult a sibling, get a different perspective, or delegate a sub-task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        to:      { type: 'string', description: 'Target colony member name (lowercase, e.g. "dreamer").' },
+        message: { type: 'string', description: 'What you want to say or ask.' },
+      },
+      required: ['to', 'message'],
     },
   },
 ];

@@ -184,21 +184,73 @@ app.whenReady().then(async () => {
   try {
     const { port } = await mcpServer.createMcpServer({
       execSkill: async (skillName, args) => {
+        // ── colony_ask: direct ephemeral LLM call to the target persona ──────
+        // Runs entirely in the main process — no renderer IPC needed.
+        // Uses store:false so it never pollutes the target's LM Studio history.
+        if (skillName === 'colony_ask') {
+          const cfg = await config.load();
+          const { to, message } = args;
+          if (!to)      throw new Error('colony_ask: "to" is required');
+          if (!message) throw new Error('colony_ask: "message" is required');
+
+          // Default names let callers use 'dreamer'/'builder'/'librarian' even if
+          // the persona's display name hasn't been customised in config.
+          const DEFAULT_NAMES = { A: 'dreamer', B: 'builder', C: 'librarian' };
+          const t = to.toLowerCase();
+          const target = ['A', 'B', 'C']
+            .map(id => ({ _id: id, ...(cfg[id] || {}) }))
+            .find(p =>
+              (p.name || '').toLowerCase()      === t ||
+              DEFAULT_NAMES[p._id].toLowerCase() === t ||
+              p._id.toLowerCase()               === t
+            );
+          if (!target)          throw new Error(`Colony member not found: "${to}"`);
+          if (!target.endpoint) throw new Error(`"${to}" has no endpoint configured`);
+
+          const basePrompt   = cfg.settings?.baseSystemPrompt || '';
+          const entityPrompt = target.systemPrompt            || '';
+          const systemPrompt = [basePrompt, entityPrompt].filter(Boolean).join('\n\n---\n\n');
+
+          const result = await llm.complete({
+            endpoint:    target.endpoint,
+            model:       target.model  || '',
+            systemPrompt,
+            apiKey:      target.apiKey || cfg.global?.apiKey || '',
+            messages:    [{ role: 'user', content: String(message) }],
+            store: false,   // ephemeral — no conversation state side-effects
+          });
+
+          const name = target.name || to;
+          return `[${name}]: ${result.text || '[no response]'}`;
+        }
+
         const handler = skills.get(skillName);
         if (!handler) throw new Error(`Unknown skill: ${skillName}`);
 
         // Reef skills need an API key + base URL that the LLM can't supply itself.
         // Inject them from the saved config so the MCP/LM-Studio-v1 path works.
+        // MCP calls carry no persona context, so we cascade: global settings key
+        // first, then any per-entity key (all entities share the same reef instance
+        // in practice, so the first non-empty one is the right one).
         let invokeArgs = args;
         if (skillName.startsWith('reef.') && !invokeArgs.apiKey) {
           const cfg = await config.load();
-          const reefKey = cfg?.settings?.reefApiKey || '';
-          const reefUrl = cfg?.settings?.reefUrl    || '';
+          const reefKey = cfg?.A?.reefApiKey || cfg?.B?.reefApiKey || cfg?.C?.reefApiKey
+            || cfg?.settings?.reefApiKey
+            || '';
+          const reefUrl = cfg?.settings?.reefUrl || '';
           invokeArgs = {
             ...invokeArgs,
             ...(reefKey ? { apiKey:   reefKey } : {}),
             ...(reefUrl ? { baseUrl:  reefUrl } : {}),
           };
+        }
+
+        // web.search — inject Tavily key from settings (never sent by the model)
+        if (skillName === 'web.search' && !invokeArgs.apiKey) {
+          const cfg = await config.load();
+          const tavilyKey = cfg?.settings?.tavilyApiKey || '';
+          if (tavilyKey) invokeArgs = { ...invokeArgs, apiKey: tavilyKey };
         }
 
         // Pass a live ctx so requestConfirm and mainWindow are always current

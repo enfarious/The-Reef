@@ -326,6 +326,15 @@ async function link(args) {
 
   const s = Math.max(0, Math.min(1, Number(strength) || 1.0));
 
+  // Verify both memory IDs exist before attempting the link
+  const { rows: existing } = await pool.query(
+    `SELECT id FROM memories WHERE id IN ($1, $2)`,
+    [Number(from_id), Number(to_id)]
+  );
+  const found = new Set(existing.map(r => r.id));
+  if (!found.has(Number(from_id))) throw new Error(`Memory ${from_id} not found — cannot create link.`);
+  if (!found.has(Number(to_id)))   throw new Error(`Memory ${to_id} not found — cannot create link.`);
+
   // Upsert: update relationship + strength if this directed link already exists
   const { rows } = await pool.query(
     `INSERT INTO memory_links (from_id, to_id, relationship, strength, created_by)
@@ -419,4 +428,114 @@ async function monitor(_args) {
   };
 }
 
-module.exports = { save, search, wakeup, list, update, link, graph, monitor };
+// ─── dedupe ────────────────────────────────────────────────────────────────────
+// Find duplicate or near-duplicate memories and optionally delete the older copies.
+//
+// args: { dry_run?, threshold?, left_by? }
+//   dry_run   — if true (default), report pairs without deleting anything
+//   threshold — similarity cutoff 0.0–1.0 (default 0.85); uses pg_trgm if available,
+//               falls back to exact body matching otherwise
+//   left_by   — restrict search to pairs where at least one memory is from this persona
+
+async function dedupe(args) {
+  const {
+    dry_run   = true,
+    threshold = 0.85,
+    left_by   = null,
+  } = args;
+
+  const persona = left_by ? normalizePersona(left_by) : null;
+
+  // ── 1. Try trigram similarity (requires pg_trgm extension) ──────────────────
+  let pairs = [];
+  let method = 'exact';
+
+  try {
+    const params = [threshold];
+    const personaFilter = persona ? ` AND (a.left_by = $2 OR b.left_by = $2)` : '';
+    if (persona) params.push(persona);
+
+    const { rows } = await pool.query(
+      `SELECT
+         a.id           AS id_a,    a.left_by AS left_by_a,
+         a.title        AS title_a, a.created_at AS created_at_a,
+         b.id           AS id_b,    b.left_by AS left_by_b,
+         b.title        AS title_b, b.created_at AS created_at_b,
+         similarity(a.body, b.body) AS sim
+       FROM memories a
+       JOIN memories b ON a.id < b.id
+       WHERE similarity(a.body, b.body) >= $1
+       ${personaFilter}
+       ORDER BY sim DESC
+       LIMIT 100`,
+      params
+    );
+    pairs  = rows;
+    method = 'trigram';
+  } catch {
+    // ── 2. Exact body match fallback (no pg_trgm needed) ──────────────────────
+    const params = [];
+    const personaFilter = persona
+      ? ` AND (a.left_by = $${params.push(persona)} OR b.left_by = $${params.length})`
+      : '';
+    // push() returns new length so the same param index is reused for both sides
+
+    // Fix: build param list properly
+    const exactParams = persona ? [persona] : [];
+    const exactFilter = persona
+      ? ' AND (a.left_by = $1 OR b.left_by = $1)'
+      : '';
+
+    const { rows } = await pool.query(
+      `SELECT
+         a.id           AS id_a,    a.left_by AS left_by_a,
+         a.title        AS title_a, a.created_at AS created_at_a,
+         b.id           AS id_b,    b.left_by AS left_by_b,
+         b.title        AS title_b, b.created_at AS created_at_b,
+         1.0            AS sim
+       FROM memories a
+       JOIN memories b ON a.id < b.id AND a.body = b.body
+       ${exactFilter.length ? 'WHERE' + exactFilter : ''}
+       ORDER BY a.id
+       LIMIT 100`,
+      exactParams
+    );
+    pairs  = rows;
+    method = 'exact';
+  }
+
+  if (!pairs.length) {
+    return { message: 'No duplicates found.', deleted: 0, pairs: [], method };
+  }
+
+  const summary = pairs.map(p => ({
+    keep:    { id: p.id_b, left_by: p.left_by_b, title: p.title_b || '(no title)', created_at: p.created_at_b },
+    discard: { id: p.id_a, left_by: p.left_by_a, title: p.title_a || '(no title)', created_at: p.created_at_a },
+    similarity: parseFloat(Number(p.sim).toFixed(3)),
+  }));
+
+  if (dry_run) {
+    return {
+      message: `Found ${pairs.length} duplicate pair(s). Re-run with dry_run: false to delete the older copies.`,
+      deleted: 0,
+      pairs:   summary,
+      method,
+    };
+  }
+
+  // Delete the older copy (lower id = older) from each pair
+  const idsToDelete = pairs.map(p => p.id_a);
+  await pool.query(
+    `DELETE FROM memories WHERE id = ANY($1::int[])`,
+    [idsToDelete]
+  );
+
+  return {
+    message: `Deleted ${idsToDelete.length} duplicate(s). Kept the newer copy in each pair.`,
+    deleted: idsToDelete.length,
+    pairs:   summary,
+    method,
+  };
+}
+
+module.exports = { save, search, wakeup, list, update, link, graph, monitor, dedupe };

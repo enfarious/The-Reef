@@ -19,6 +19,7 @@
     <button class="sw-tab" data-tab="display">DISPLAY</button>
     <button class="sw-tab" data-tab="operator">OPERATOR</button>
     <button class="sw-tab" data-tab="tools">TOOLS</button>
+    <button class="sw-tab" data-tab="database">DATABASE</button>
   </nav>
 
   <!-- ── Right content ────────────────────────────────────────────────── -->
@@ -111,6 +112,12 @@
         <input class="sw-input" id="sReefApiKey" type="password" placeholder="reef_…">
         <div class="sw-hint">Used as the default key for all Reef operations.</div>
       </div>
+
+      <div class="sw-field">
+        <label class="sw-label">TAVILY API KEY</label>
+        <input class="sw-input" id="sTavilyApiKey" type="password" placeholder="tvly-…">
+        <div class="sw-hint">Required for the web_search tool. Get a free key at <a href="https://tavily.com" target="_blank">tavily.com</a>.</div>
+      </div>
     </section>
 
     <!-- DISPLAY ─────────────────────────────────────────────────────────── -->
@@ -181,6 +188,49 @@
       </div>
 
       <button class="sw-tool-import-btn" id="swToolImportBtn">+ IMPORT TOOL</button>
+    </section>
+
+    <!-- DATABASE ────────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-database">
+      <h2 class="sw-section-title">DATABASE</h2>
+
+      <div class="sw-restart-notice" id="swDbRestartNotice" style="display:none">
+        ⚠ Restart required for database changes to take effect.
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">HOST</label>
+        <input class="sw-input" id="sDbHost" type="text"
+               placeholder="localhost" spellcheck="false" autocomplete="off">
+        <div class="sw-hint">PostgreSQL server hostname or IP address.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">PORT</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sDbPort"
+                 type="number" min="1" max="65535" step="1" value="5432">
+        </div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">DATABASE</label>
+        <input class="sw-input" id="sDbName" type="text"
+               placeholder="reef" spellcheck="false" autocomplete="off">
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">USER</label>
+        <input class="sw-input" id="sDbUser" type="text"
+               placeholder="postgres" spellcheck="false" autocomplete="off">
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">PASSWORD</label>
+        <input class="sw-input" id="sDbPassword" type="password"
+               placeholder="••••••••" autocomplete="new-password">
+        <div class="sw-hint">Encrypted at rest using your OS keychain.</div>
+      </div>
     </section>
 
   </main>

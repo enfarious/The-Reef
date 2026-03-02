@@ -89,6 +89,18 @@
   letter-spacing: 0.04em;
 }
 
+.sw-restart-notice {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: rgba(255, 190, 70, 0.9);
+  background: rgba(255, 160, 40, 0.08);
+  border: 1px solid rgba(255, 160, 40, 0.22);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 18px;
+  letter-spacing: 0.04em;
+}
+
 .sw-hint {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.6rem;

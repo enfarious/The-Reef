@@ -16,6 +16,8 @@ const BUILTIN_TOOLS = [
   { name: 'memory_save',     description: 'Save a memory to the collective colony memory pool.' },
   { name: 'memory_search',   description: 'Search the collective colony memory pool.' },
   { name: 'memory_link',     description: 'Create a directed association between two memories.' },
+  { name: 'ecology_monitor', description: 'Return colony-wide memory ecology stats and health check.' },
+  { name: 'memory_dedupe',   description: 'Find and remove duplicate or near-duplicate memories.' },
   { name: 'reef_post',       description: 'Post an entry to The Reef documentation site.' },
   { name: 'reef_get',        description: 'Retrieve an entry from The Reef by its entry ID.' },
   { name: 'reef_list',       description: 'List or search entries on The Reef.' },
@@ -23,6 +25,17 @@ const BUILTIN_TOOLS = [
   { name: 'message_inbox',   description: 'Read messages from your colony inbox.' },
   { name: 'message_reply',   description: 'Reply to a colony message.' },
   { name: 'message_search',  description: 'Search the colony message history.' },
+  { name: 'code_search',     description: 'Search code in the workspace using ripgrep.' },
+  { name: 'git_status',      description: 'Show working tree status.' },
+  { name: 'git_diff',        description: 'Show file differences.' },
+  { name: 'git_log',         description: 'Show commit history.' },
+  { name: 'git_commit',      description: 'Stage files and create a commit.' },
+  { name: 'git_branch',      description: 'List, create, or switch branches.' },
+  { name: 'git_push',        description: 'Push commits to remote.' },
+  { name: 'reddit_search',   description: 'Search Reddit for posts.' },
+  { name: 'reddit_hot',      description: 'Browse a subreddit\'s feed.' },
+  { name: 'reddit_post',     description: 'Read a Reddit post and comments.' },
+  { name: 'web_search',      description: 'Search the web via Tavily.' },
   { name: 'colony_ask',      description: 'Send a question or directive to another colony member.' },
 ];
 
@@ -68,7 +81,7 @@ async function save() {
   // in the main renderer window since the settings window was opened.
   const fresh = await window.reef.loadConfig();
   const base  = (fresh?.ok ? fresh.result : fresh) ?? loadedCfg;
-  const cfg   = { ...base, settings: buildSettings() };
+  const cfg   = { ...base, settings: buildSettings(), database: buildDatabaseSettings() };
   loadedCfg   = cfg;   // keep our local copy current
   await window.reef.saveConfig(cfg);
 }
@@ -78,6 +91,7 @@ function buildSettings() {
   return {
     reefUrl:           val('sReefUrl'),
     reefApiKey:        val('sReefApiKey'),
+    tavilyApiKey:      val('sTavilyApiKey'),
     colonyName:        val('sColonyName'),
     baseSystemPrompt:  val('sBasePrompt'),
     fontScale:         parseInt(document.getElementById('sFontScale').value, 10) || 100,
@@ -88,7 +102,7 @@ function buildSettings() {
     heartbeatInterval: Math.max(5, parseInt(val('sHeartbeatInterval'), 10) || 60),
     contextWindow:     Math.max(512, parseInt(val('sContextWindow'),   10) || 4096),
     maxToolSteps:      Math.min(20, Math.max(1, parseInt(val('sMaxToolSteps'),   10) || 5)),
-    maxThinkingTime:   Math.max(0,             parseInt(val('sMaxThinkingTime'), 10) ?? 120),
+    maxThinkingTime:   Math.max(0,             parseInt(val('sMaxThinkingTime'), 10) || 0),
     streamChat:        document.getElementById('sStreamChat')?.checked ?? false,
     toolStates:        s.toolStates  || {},
     customTools:       s.customTools || [],
@@ -97,6 +111,16 @@ function buildSettings() {
 }
 
 function val(id) { return document.getElementById(id)?.value ?? ''; }
+
+function buildDatabaseSettings() {
+  return {
+    host:     val('sDbHost')  || 'localhost',
+    port:     Math.max(1, Math.min(65535, parseInt(val('sDbPort'), 10) || 5432)),
+    database: val('sDbName')  || 'reef',
+    user:     val('sDbUser')  || 'postgres',
+    password: val('sDbPassword'),
+  };
+}
 
 // ─── Populate fields on load ──────────────────────────────────────────────────
 
@@ -110,6 +134,7 @@ function populate(cfg) {
   set('sMaxThinkingTime',   s.maxThinkingTime   ?? 120);
   set('sReefUrl',           s.reefUrl           || '');
   set('sReefApiKey',        s.reefApiKey        || '');
+  set('sTavilyApiKey',      s.tavilyApiKey      || '');
   set('sOperatorName',      s.operatorName      || '');
   set('sOperatorBirthdate', s.operatorBirthdate || '');
   set('sOperatorAbout',     s.operatorAbout     || '');
@@ -117,6 +142,13 @@ function populate(cfg) {
   buildColorPalette(s.fontColors || 'cool');
   setStreamChat(s.streamChat ?? false);
   buildToolsList();
+
+  const db = cfg.database || {};
+  set('sDbHost',     db.host     || '');
+  set('sDbPort',     db.port     || 5432);
+  set('sDbName',     db.database || '');
+  set('sDbUser',     db.user     || '');
+  set('sDbPassword', db.password || '');
 }
 
 function set(id, value) {
@@ -288,7 +320,7 @@ function flash(el) {
 
 // ─── Field change listeners ───────────────────────────────────────────────────
 
-['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey',
+['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sTavilyApiKey',
  'sOperatorName', 'sOperatorBirthdate', 'sOperatorAbout'].forEach(id => {
   document.getElementById(id).addEventListener('input', scheduleSave);
 });
@@ -296,6 +328,45 @@ function flash(el) {
 document.getElementById('sHeartbeatInterval').addEventListener('change', e => {
   const mins = Math.max(5, parseInt(e.target.value, 10) || 60);
   e.target.value = mins;
+  scheduleSave();
+});
+
+document.getElementById('sContextWindow').addEventListener('change', e => {
+  const v = Math.max(512, parseInt(e.target.value, 10) || 4096);
+  e.target.value = v;
+  scheduleSave();
+});
+
+document.getElementById('sMaxToolSteps').addEventListener('change', e => {
+  const v = Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 5));
+  e.target.value = v;
+  scheduleSave();
+});
+
+document.getElementById('sMaxThinkingTime').addEventListener('change', e => {
+  const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+  e.target.value = v;
+  scheduleSave();
+});
+
+// ─── Database field listeners ──────────────────────────────────────────────────
+
+function showDbRestartNotice() {
+  const el = document.getElementById('swDbRestartNotice');
+  if (el) el.style.display = '';
+}
+
+['sDbHost', 'sDbName', 'sDbUser', 'sDbPassword'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', () => {
+    showDbRestartNotice();
+    scheduleSave();
+  });
+});
+
+document.getElementById('sDbPort')?.addEventListener('change', e => {
+  const v = Math.max(1, Math.min(65535, parseInt(e.target.value, 10) || 5432));
+  e.target.value = v;
+  showDbRestartNotice();
   scheduleSave();
 });
 
