@@ -74,6 +74,37 @@ registry.set('reddit.search', reddit.search);
 registry.set('reddit.hot',    reddit.hot);
 registry.set('reddit.post',   reddit.post);
 
+const rightBrain = require('./right-brain');
+registry.set('graph.addNode',    rightBrain.addNode);
+registry.set('graph.ensureNode', rightBrain.ensureNode);
+registry.set('graph.addEdge',    rightBrain.addEdge);
+registry.set('graph.recall',     rightBrain.recall);
+registry.set('graph.fuzzySearch',rightBrain.fuzzySearch);
+registry.set('graph.traverse',   rightBrain.traverse);
+registry.set('graph.reinforce',  rightBrain.reinforceEdge);
+registry.set('graph.embed',      rightBrain.embed);
+registry.set('graph.stats',      rightBrain.getStats);
+
+const broker = require('./broker');
+registry.set('broker.remember', broker.remember);
+registry.set('broker.recall',   broker.recall);
+
+const workingMemory = require('./working-memory');
+registry.set('working_memory.write',              workingMemory.write);
+registry.set('working_memory.read',               workingMemory.read);
+registry.set('working_memory.reinforce',          workingMemory.reinforce);
+registry.set('working_memory.pendingConsolidation', workingMemory.pendingConsolidation);
+registry.set('working_memory.sweep',              workingMemory.sweep);
+registry.set('working_memory.stats',              workingMemory.stats);
+
+const consolidation = require('./consolidation');
+registry.set('graph.consolidate', consolidation.runFor);
+
+const arbitration = require('./arbitration');
+registry.set('graph.arbitrate',        arbitration.runAutoResolve);
+registry.set('graph.arbitrate.list',   arbitration.listPending);
+registry.set('graph.arbitrate.resolve',arbitration.resolve);
+
 module.exports = {
   get: (name) => registry.get(name),
   list: () => [...registry.keys()],

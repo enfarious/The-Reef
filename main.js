@@ -7,7 +7,9 @@ const skills    = require('./skills/index');
 const llm       = require('./skills/llm');
 const db        = require('./skills/db');
 const config    = require('./skills/config');
-const mcpServer = require('./skills/mcp-server');
+const mcpServer  = require('./skills/mcp-server');
+const rightBrain = require('./skills/right-brain');
+const broker     = require('./skills/broker');
 
 // Port of the local MCP tool server (assigned at startup, null until ready)
 let mcpPort = null;
@@ -176,6 +178,24 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[main] DB init failed — memory system unavailable:', err.message);
   }
+
+  // ── Broker source registry + trust weights ───────────────────────────────────
+  // Seeds personas into lb_sources, then loads weights into the in-memory cache.
+  broker.seedSources()
+    .then(() => broker.trust.load())
+    .catch(err => {
+      console.error('[main] broker seedSources/trust.load failed:', err.message);
+    });
+
+  // ── Right-brain graph memory ──────────────────────────────────────────────────
+  // Async — model download (~80MB on first run) happens here.
+  // Skills return errors until ready; app continues regardless.
+  rightBrain.init({
+    dbPath:   path.join(app.getPath('userData'), 'right-brain.db'),
+    cacheDir: path.join(app.getPath('userData'), '.transformers-cache'),
+  }).catch(err => {
+    console.error('[main] right-brain init failed — graph memory unavailable:', err.message);
+  });
 
   // ── MCP tool server ───────────────────────────────────────────────────────────
   // Starts a local JSON-RPC 2.0 HTTP server that exposes our built-in skills to

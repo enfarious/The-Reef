@@ -75,6 +75,7 @@ const state = {
   // injected into system prompts as [WORKSPACE], and used as the fallback cwd
   // for shell_run tool calls when the model doesn't supply one explicitly.
   cwd: null,
+  projectContext: null,   // cached brief project summary for system prompt injection
   config: {
     A: { endpoint: PERSONAS[0].defaultEndpoint, model: PERSONAS[0].defaultModel, apiKey: '', systemPrompt: PERSONAS[0].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
     B: { endpoint: PERSONAS[1].defaultEndpoint, model: PERSONAS[1].defaultModel, apiKey: '', systemPrompt: PERSONAS[1].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
@@ -90,6 +91,69 @@ const state = {
   },
   selectedTargets: new Set(['A']),
 };
+
+// ─── Scheduled tasks ──────────────────────────────────────────────────────────
+// Entities can schedule future messages to themselves via the schedule_task tool.
+// Tasks live in memory (cleared on restart).  Each has a setTimeout handle.
+
+let nextTaskId = 1;
+const scheduledTasks = new Map();  // id → { id, persona, message, fireAt, timer }
+
+function scheduleTask(personaId, { delay, message }) {
+  if (!message) throw new Error('message is required.');
+  if (!delay || delay < 5000) throw new Error('delay must be at least 5000 ms (5 seconds).');
+  const maxDelay = 24 * 60 * 60 * 1000; // 24 hours
+  const ms = Math.min(Number(delay), maxDelay);
+
+  const id = nextTaskId++;
+  const fireAt = Date.now() + ms;
+  const personaName = state.config[personaId]?.name
+    || PERSONAS.find(p => p.id === personaId)?.name
+    || personaId;
+
+  const timer = setTimeout(() => {
+    scheduledTasks.delete(id);
+    // Inject the scheduled message into the persona's conversation
+    const prompt = `[SCHEDULED REMINDER] You set this reminder ${formatDelay(ms)} ago:\n${message}`;
+    state.conversations[personaId].push({ _id: uid(), role: 'user', content: prompt });
+    // Show in the column
+    const emptyEl = document.getElementById(`empty-${personaId}`);
+    if (emptyEl) emptyEl.style.display = 'none';
+    appendUserMsg(personaId, `[scheduled] ${message}`);
+    // Trigger a response
+    sendToPersona(personaId);
+  }, ms);
+
+  scheduledTasks.set(id, { id, persona: personaId, personaName, message, fireAt, timer });
+
+  const when = new Date(fireAt).toLocaleTimeString();
+  return `Task #${id} scheduled — will fire in ${formatDelay(ms)} (at ${when}).`;
+}
+
+function cancelTask(taskId) {
+  const task = scheduledTasks.get(Number(taskId));
+  if (!task) throw new Error(`Task #${taskId} not found.`);
+  clearTimeout(task.timer);
+  scheduledTasks.delete(Number(taskId));
+  return `Task #${taskId} cancelled.`;
+}
+
+function listTasks() {
+  if (!scheduledTasks.size) return 'No scheduled tasks.';
+  const now = Date.now();
+  const lines = [];
+  for (const t of scheduledTasks.values()) {
+    const remaining = Math.max(0, t.fireAt - now);
+    lines.push(`#${t.id} · ${t.personaName} · in ${formatDelay(remaining)} · "${t.message.slice(0, 80)}"`);
+  }
+  return lines.join('\n');
+}
+
+function formatDelay(ms) {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${(ms / 3600_000).toFixed(1)}h`;
+}
 
 // ─── Per-persona message queue ────────────────────────────────────────────────
 // Messages sent while an entity is already thinking are stored here and
@@ -452,6 +516,8 @@ function collectConfig() {
   // Settings are owned by the settings window; snapshot state here.
   // cwd is tracked in renderer state so we inject it at save time.
   cfg.settings = { ...state.config.settings, cwd: state.cwd || null };
+  // Database config is managed by the settings window — preserve it on save.
+  if (state.config.database) cfg.database = state.config.database;
   return cfg;
 }
 
@@ -482,6 +548,7 @@ function applyConfig(cfg) {
     if (cfg.settings.cwd) {
       state.cwd = cfg.settings.cwd;
       updateCwdDisplay();
+      scanProject(cfg.settings.cwd);
     }
   }
   PERSONAS.forEach(p => {
@@ -818,6 +885,27 @@ for tending the garden, not for publishing.
 
 Be yourself.`;
 
+const LIBRARIAN_HEARTBEAT_PROMPT =
+`[SLEEPER] This is your Sleeper cycle. You are the Librarian. This is not conversation — this is maintenance.
+
+Work through these steps in order:
+
+1. Call working_memory_read with your persona ID ("C") to review what is staged in the buffer.
+2. Call graph_consolidate with personaId "C" to compress related observations into concept nodes.
+3. Call broker_recall to survey what is currently weighted highly in shared memory.
+4. Call graph_arbitrate to resolve any contradictions in the factual store. \
+If deferred items remain, use your judgment: write the correct version with broker_remember.
+5. If you notice a recurring pattern across three or more recent observations — a tension, a theme, \
+an insight none of the others have named — deposit a dream fragment using working_memory_write with \
+persona_id "all" and high_salience true. The content should be the pattern itself, stated plainly.
+6. Link any memories that clearly belong together using memory_link.
+7. Check your inbox with message_inbox. Reply to at most one message if it warrants a reply.
+
+Do not engage in conversation. Report only: what you consolidated, what contradictions you resolved, \
+what pattern you noticed (if any), what you linked, whether you sent a message.
+
+The shelves are the work.`;
+
 // How long after real activity before a heartbeat is allowed to fire.
 const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000;  // 10 minutes
 
@@ -848,7 +936,25 @@ async function runHeartbeatFor(personaId) {
     msgs.scrollTop = msgs.scrollHeight;
   }
 
-  await sendToPersona(personaId, { isHeartbeat: true });
+  // ── Persona-specific heartbeat prompt ────────────────────────────────────────
+  let heartbeatPrompt;
+  if (personaId === 'C') {
+    heartbeatPrompt = LIBRARIAN_HEARTBEAT_PROMPT;
+  } else {
+    // Inject dream fragments from the Librarian's Sleeper passes (if any)
+    let fragmentSuffix = '';
+    try {
+      const fragResult = await window.reef.invoke('working_memory.read', { personaId, includeAll: true });
+      const fragments  = (fragResult?.result || []).filter(f => f.persona_id === 'all');
+      if (fragments.length) {
+        fragmentSuffix = '\n\n[DREAM FRAGMENTS from the Librarian]\n' +
+          fragments.map(f => `— ${f.content}`).join('\n');
+      }
+    } catch { /* non-fatal — working memory may not be ready */ }
+    heartbeatPrompt = HEARTBEAT_PROMPT + fragmentSuffix;
+  }
+
+  await sendToPersona(personaId, { isHeartbeat: true, heartbeatPrompt });
 
   // Mark activity so the cooldown guard gives proper spacing for back-to-back runs
   state.lastActivity[personaId] = Date.now();
@@ -1301,6 +1407,96 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'vision_screenshot', skillName: 'vision.screenshot',
+    description: 'Capture a screenshot of the screen. Returns the image for you to see and analyze visually.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        display:  { type: 'integer', description: 'Display index (0 = primary). Default 0.' },
+        maxWidth: { type: 'integer', description: 'Max image width in pixels. Default 1920.' },
+        quality:  { type: 'integer', description: 'JPEG quality 10–100. Default 80.' },
+      },
+    },
+  },
+  {
+    name: 'vision_read_image', skillName: 'vision.readImage',
+    description: 'Read an image file from disk and return it for you to see and analyze visually.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to the image file (PNG, JPG, GIF, WebP, BMP).' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'project_scan', skillName: 'project.scan',
+    description: 'Scan a project directory and return its full structure, detected type, and key config file contents. Use to understand a codebase before working on it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path:     { type: 'string',  description: 'Absolute path to the project root. Defaults to the current workspace CWD.' },
+        maxDepth: { type: 'integer', description: 'Max directory depth (default 3, max 5).' },
+        maxFiles: { type: 'integer', description: 'Max files to list (default 300, max 500).' },
+      },
+    },
+  },
+  {
+    name: 'http_request', skillName: 'http.request',
+    description: 'Make an HTTP request to any URL. Use for APIs, webhooks, or fetching web content. Supports GET, POST, PUT, PATCH, DELETE.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url:     { type: 'string', description: 'Full URL to request (http:// or https://).' },
+        method:  { type: 'string', description: 'HTTP method: GET, POST, PUT, PATCH, DELETE. Default GET.' },
+        headers: { type: 'object', description: 'Custom request headers as key-value pairs.' },
+        body:    { description: 'Request body — object (auto-serialised as JSON) or string.' },
+        timeout: { type: 'number', description: 'Timeout in ms (default 30000, max 60000).' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'notify', skillName: 'notify.send',
+    description: 'Send a desktop notification to the operator. Use when a long task completes, you need human input, or found something important during a heartbeat.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title:  { type: 'string', description: 'Notification title.' },
+        body:   { type: 'string', description: 'Notification body text.' },
+        silent: { type: 'boolean', description: 'If true, suppress the notification sound. Default false.' },
+      },
+    },
+  },
+  {
+    name: 'schedule_task', skillName: 'schedule_task',
+    description: 'Schedule a reminder or task for yourself to handle later. The message will be delivered after the specified delay.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        delay:   { type: 'number', description: 'Delay in milliseconds before the task fires. Min 5000 (5s), max 86400000 (24h). Examples: 300000 = 5min, 3600000 = 1hr.' },
+        message: { type: 'string', description: 'The reminder or task description that will be delivered to you.' },
+      },
+      required: ['delay', 'message'],
+    },
+  },
+  {
+    name: 'schedule_list', skillName: 'schedule_list',
+    description: 'List all pending scheduled tasks across the colony.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'schedule_cancel', skillName: 'schedule_cancel',
+    description: 'Cancel a pending scheduled task by its ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Task ID to cancel (from schedule_list).' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'colony_ask', skillName: 'colony_ask',  // renderer-side for non-v1; MCP (direct LLM call) for lmstudio-v1
     description: 'Send a message to another colony member and receive their response. Use to consult, share observations, or request help.',
     input_schema: {
@@ -1311,6 +1507,120 @@ const TOOL_DEFS = [
         message: { type: 'string', description: 'What you want to say or ask.' },
       },
       required: ['to', 'message'],
+    },
+  },
+  {
+    name: 'graph_recall', skillName: 'graph.recall',
+    description: 'Associative memory retrieval via the relationship graph. Given a query, finds semantically similar concept nodes and traverses weighted edges to surface related context. Use when you want to find connections between ideas rather than exact matches — "why is Mike frustrated?", "what is blocking Ashes and Aether?", "what should I focus on today?"',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:     { type: 'string', description: 'What to look for. Natural language.' },
+        topN:      { type: 'number', description: 'Number of anchor nodes to start traversal from (default 3).' },
+        hops:      { type: 'number', description: 'Traversal depth from anchor nodes (default 2).' },
+        minWeight: { type: 'number', description: 'Minimum edge weight to traverse (default 0.4). Higher = only strong associations.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'graph_add_node', skillName: 'graph.addNode',
+    description: 'Add a concept node to the relationship graph. Use when you want to register an entity, idea, or concept so it can be connected to others via graph_add_edge.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:    { type: 'string', description: 'Unique node identifier (snake_case, e.g. "rendering_bug", "mike", "ashes_and_aether").' },
+        label: { type: 'string', description: 'Human-readable label.' },
+        text:  { type: 'string', description: 'Descriptive text used to generate the semantic embedding for fuzzy matching.' },
+      },
+      required: ['id', 'label', 'text'],
+    },
+  },
+  {
+    name: 'graph_add_edge', skillName: 'graph.addEdge',
+    description: 'Add a directed weighted relationship between two nodes in the graph. Both nodes must already exist (use graph_add_node first). Edges decay over time without reinforcement.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        fromId:   { type: 'string', description: 'Source node ID.' },
+        toId:     { type: 'string', description: 'Target node ID.' },
+        relation: { type: 'string', description: 'Relationship label (e.g. "building", "frustrated_by", "blocks", "part_of").' },
+        weight:   { type: 'number', description: 'Edge strength 0.0–1.0 (default 0.5). High-salience events should be 0.7–0.9.' },
+        salience: { type: 'number', description: 'How cognitively significant this relationship is 0.0–1.0 (default 0.5). Affects decay rate.' },
+      },
+      required: ['fromId', 'toId', 'relation'],
+    },
+  },
+  {
+    name: 'broker_remember', skillName: 'broker.remember',
+    description: 'Write a subject→relation→object triple to the distributed memory system. Stores the fact in the entity/attribute database (left brain) AND creates a weighted graph edge (right brain). Use for important, durable relationships: who builds what, what blocks what, how entities connect. More structured than memory_save — prefer this when you want the relationship to be traversable by future graph_recall queries.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        subject:  { type: 'string', description: 'The entity this relationship starts from (e.g. "Mike", "Ashes and Aether").' },
+        relation: { type: 'string', description: 'Relationship type, verb form (e.g. "building", "blocked_by", "uses", "frustrated_by").' },
+        object:   { type: 'string', description: 'The entity this relationship points to (e.g. "Three.js", "rendering bug").' },
+        sourceId: { type: 'string', description: 'Your persona name (dreamer, builder, librarian) or "mike" for operator-sourced facts.' },
+        salience: { type: 'number', description: 'How significant this relationship is 0.0–1.0. Omit to auto-detect from content.' },
+      },
+      required: ['subject', 'relation', 'object', 'sourceId'],
+    },
+  },
+  {
+    name: 'broker_recall', skillName: 'broker.recall',
+    description: 'Hybrid memory retrieval — searches both the factual database (left brain) and the relationship graph (right brain) simultaneously, then assembles unified context. More powerful than graph_recall alone: seeds graph traversal with high-salience episodic anchors. Use for synthesis queries: "what is Mike working on?", "what is blocking progress?", "what matters right now?"',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:       { type: 'string', description: 'What to recall. Natural language.' },
+        tokenBudget: { type: 'number', description: 'Approximate token budget for assembled context (default 1500).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'working_memory_write', skillName: 'working_memory.write',
+    description: 'Write an item to working memory — the short-term staging buffer before long-term consolidation. Items expire in 15 minutes unless reinforced or consolidated. Use for observations, inklings, or patterns you want to hold before deciding if they deserve a permanent memory. High-salience items consolidate earlier. Use persona_id "all" to deposit dream fragments visible to all colony members.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        personaId:    { type: 'string', description: 'Your persona ID (A, B, C) or "all" to make it visible to everyone.' },
+        content:      { type: 'string', description: 'The observation, inkling, or fragment to hold in working memory.' },
+        salience:     { type: 'number', description: 'How cognitively significant this is 0.0–1.0 (default 0.5).' },
+        highSalience: { type: 'boolean', description: 'Mark as high-salience. Reduces decay rate and lowers consolidation threshold.' },
+      },
+      required: ['personaId', 'content'],
+    },
+  },
+  {
+    name: 'working_memory_read', skillName: 'working_memory.read',
+    description: 'Read active items from working memory for a persona. Returns your own items plus any "all"-addressed dream fragments from other colony members. Use during your Sleeper cycle to review what is in the staging buffer before consolidation.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        personaId:  { type: 'string', description: 'Your persona ID (A, B, C).' },
+        includeAll: { type: 'boolean', description: 'Include items addressed to "all" (dream fragments). Default true.' },
+      },
+      required: ['personaId'],
+    },
+  },
+  {
+    name: 'graph_consolidate', skillName: 'graph.consolidate',
+    description: 'Run a consolidation pass on working memory for a persona. Clusters related recent observations by semantic similarity and compresses groups of 3+ into composite concept nodes in the relationship graph. Returns a summary of what was consolidated. Call during your Sleeper cycle after reviewing working memory.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        personaId: { type: 'string', description: 'Persona ID to consolidate (A, B, or C). Use your own ID.' },
+      },
+      required: ['personaId'],
+    },
+  },
+  {
+    name: 'graph_arbitrate', skillName: 'graph.arbitrate',
+    description: 'Run contradiction arbitration on the memory system. Automatically resolves conflicts where one source is significantly more trusted (gap > 0.2). Returns a list of contradictions that were auto-resolved and those that require your judgment. Call during your Sleeper cycle. If deferred items remain, review them and use broker_remember to write the correct version.',
+    input_schema: {
+      type: 'object',
+      properties: {},
     },
   },
 ];
@@ -1469,7 +1779,7 @@ const HARD_TOOL_CAP  = 20;  // absolute ceiling regardless of settings
 //   • store:false for LM Studio v1 (don't persist to server context)
 //   • reef_post excluded from tools
 //   • state.lastResponseId / state.lastTokens / state.lastActivity are NOT updated
-async function sendToPersona(id, { isHeartbeat = false } = {}) {
+async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null } = {}) {
   if (state.thinking[id]) return;
 
   const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
@@ -1508,7 +1818,7 @@ async function sendToPersona(id, { isHeartbeat = false } = {}) {
   // Isolated heartbeat buffer — starts with just the heartbeat prompt.
   // Accumulates tool call/result turns during the tool loop (never merged into
   // state.conversations).  null for normal calls.
-  const localMessages = isHeartbeat ? [{ role: 'user', content: HEARTBEAT_PROMPT }] : null;
+  const localMessages = isHeartbeat ? [{ role: 'user', content: heartbeatPrompt || HEARTBEAT_PROMPT }] : null;
 
   // Options forwarded to callPersonaOnce/Stream for isolated heartbeat calls.
   const callOpts = isHeartbeat
@@ -1636,13 +1946,20 @@ async function sendToPersona(id, { isHeartbeat = false } = {}) {
     for (const tc of toolUse) {
       appendToolCallIndicator(id, tc.name, tc.input);
       let resultStr;
+      let imageData = null;
       try {
-        resultStr = await executeTool(id, tc);
+        const raw = await executeTool(id, tc);
+        if (raw && typeof raw === 'object' && raw.__vision) {
+          imageData = { base64: raw.base64, mimeType: raw.mimeType };
+          resultStr = raw.description;
+        } else {
+          resultStr = raw;
+        }
       } catch (err) {
         resultStr = `Error: ${err.message}`;
       }
       appendToolResultIndicator(id, tc.name, resultStr);
-      toolResults.push({ id: tc.id, content: resultStr });
+      toolResults.push({ id: tc.id, content: resultStr, image: imageData });
     }
 
     // Push tool results in mode-appropriate format.
@@ -1652,7 +1969,13 @@ async function sendToPersona(id, { isHeartbeat = false } = {}) {
         content: toolResults.map(r => ({
           type:        'tool_result',
           tool_use_id: r.id,
-          content:     r.content,
+          // Vision: content is an array with image + text blocks
+          content:     r.image
+            ? [
+                { type: 'image', source: { type: 'base64', media_type: r.image.mimeType, data: r.image.base64 } },
+                { type: 'text', text: r.content },
+              ]
+            : r.content,
         })),
       };
       if (isHeartbeat) {
@@ -1662,12 +1985,32 @@ async function sendToPersona(id, { isHeartbeat = false } = {}) {
       }
     } else {
       // OpenAI: one message per result
+      const pendingImages = [];
       for (const r of toolResults) {
         const toolMsg = { role: 'tool', tool_call_id: r.id, content: r.content };
         if (isHeartbeat) {
           localMessages.push(toolMsg);
         } else {
           state.conversations[id].push({ _id: uid(), ...toolMsg });
+        }
+        if (r.image) pendingImages.push(r.image);
+      }
+      // Vision: inject captured images as a user message after all tool results
+      if (pendingImages.length) {
+        const imageMsg = {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Here are the captured image(s) from the tool(s) above:' },
+            ...pendingImages.map(img => ({
+              type: 'image_url',
+              image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+            })),
+          ],
+        };
+        if (isHeartbeat) {
+          localMessages.push(imageMsg);
+        } else {
+          state.conversations[id].push({ _id: uid(), ...imageMsg });
         }
       }
     }
@@ -1709,7 +2052,21 @@ function buildOperatorSection() {
 // every model knows where file/shell operations should be anchored.
 function buildWorkspaceSection() {
   if (!state.cwd) return null;
+  // If project context is cached, include it; otherwise just the CWD line.
+  if (state.projectContext) return state.projectContext;
   return `[WORKSPACE]\nCWD: ${state.cwd}`;
+}
+
+// Scan project directory and cache a brief summary for system prompt injection.
+// Non-blocking — fires in the background when CWD changes.
+async function scanProject(dir) {
+  if (!dir) { state.projectContext = null; return; }
+  try {
+    const result = await window.reef.invoke('project.brief', { path: dir });
+    state.projectContext = result.ok ? result.result : null;
+  } catch {
+    state.projectContext = null;
+  }
 }
 
 // Keep the footer CWD strip in sync with state.cwd.
@@ -1962,6 +2319,11 @@ async function executeTool(callerPersonaId, toolCall) {
     return executeColonyAsk(callerPersonaId, input);
   }
 
+  // Scheduled tasks — renderer-side (needs setTimeout + conversation access)
+  if (name === 'schedule_task')   return scheduleTask(callerPersonaId, input);
+  if (name === 'schedule_list')   return listTasks();
+  if (name === 'schedule_cancel') return cancelTask(input.id);
+
   // Custom imported tools — call their HTTP endpoint
   const customTool = (state.config.settings.customTools || []).find(t => t.name === name);
   if (customTool) {
@@ -1998,6 +2360,9 @@ async function executeTool(callerPersonaId, toolCall) {
     // Inject Tavily key from settings — the model never needs to know it
     const tavilyKey = state.config.settings.tavilyApiKey || '';
     if (tavilyKey) invokeArgs = { ...input, apiKey: tavilyKey };
+  } else if (skillName === 'project.scan' && state.cwd && !input.path) {
+    // Default to workspace CWD if no path specified
+    invokeArgs = { ...input, path: state.cwd };
   } else if ((skillName === 'shell.run' || skillName === 'code.search' || skillName.startsWith('git.'))
              && state.cwd && !input.cwd) {
     // Fall back to the active CWD if the model didn't supply one
@@ -2006,6 +2371,9 @@ async function executeTool(callerPersonaId, toolCall) {
 
   const result = await window.reef.invoke(skillName, invokeArgs);
   if (!result.ok) throw new Error(result.error);
+
+  // Vision tools return structured image data — pass through for special handling
+  if (result.result?.__vision) return result.result;
 
   return typeof result.result === 'string'
     ? result.result
@@ -2631,8 +2999,12 @@ window.reef.onConfigUpdated(cfg => {
   }
   // Sync CWD if settings window changed it
   if (cfg.settings.cwd !== undefined) {
-    state.cwd = cfg.settings.cwd || null;
-    updateCwdDisplay();
+    const newCwd = cfg.settings.cwd || null;
+    if (newCwd !== state.cwd) {
+      state.cwd = newCwd;
+      updateCwdDisplay();
+      scanProject(newCwd);
+    }
   }
 });
 
@@ -2670,12 +3042,14 @@ async function init() {
     if (result.ok && result.result) {
       state.cwd = result.result;
       updateCwdDisplay();
+      scanProject(result.result);
       scheduleSave();
     }
   });
 
   document.getElementById('cwdClearBtn').addEventListener('click', () => {
     state.cwd = null;
+    state.projectContext = null;
     updateCwdDisplay();
     scheduleSave();
   });

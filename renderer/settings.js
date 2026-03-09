@@ -35,8 +35,16 @@ const BUILTIN_TOOLS = [
   { name: 'reddit_search',   description: 'Search Reddit for posts.' },
   { name: 'reddit_hot',      description: 'Browse a subreddit\'s feed.' },
   { name: 'reddit_post',     description: 'Read a Reddit post and comments.' },
-  { name: 'web_search',      description: 'Search the web via Tavily.' },
-  { name: 'colony_ask',      description: 'Send a question or directive to another colony member.' },
+  { name: 'web_search',         description: 'Search the web via Tavily.' },
+  { name: 'vision_screenshot', description: 'Capture a screenshot of the screen.' },
+  { name: 'vision_read_image', description: 'Read an image file for visual analysis.' },
+  { name: 'project_scan',     description: 'Scan a project directory structure and config.' },
+  { name: 'http_request',     description: 'Make an HTTP request to any URL or API.' },
+  { name: 'notify',           description: 'Send a desktop notification to the operator.' },
+  { name: 'schedule_task',    description: 'Schedule a reminder or task for later.' },
+  { name: 'schedule_list',    description: 'List pending scheduled tasks.' },
+  { name: 'schedule_cancel',  description: 'Cancel a scheduled task.' },
+  { name: 'colony_ask',        description: 'Send a question or directive to another colony member.' },
 ];
 
 // ─── Text color presets ───────────────────────────────────────────────────────

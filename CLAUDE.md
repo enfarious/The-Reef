@@ -51,11 +51,13 @@ skills/
 
 ## Three Personas
 
-| ID | Name      | Role                 | Default Model       | Color   |
-|----|-----------|----------------------|---------------------|---------|
-| A  | DREAMER   | vision · ideation    | claude-opus-4.6     | #00e5c8 |
-| B  | BUILDER   | systems · construction | claude-sonnet-4.6 | #0097ff |
-| C  | LIBRARIAN | memory · documentation | claude-sonnet-4.6 | #a855f7 |
+| ID | Name      | Role                           | Default Model       | Color   |
+|----|-----------|--------------------------------|---------------------|---------|
+| A  | DREAMER   | vision · ideation              | claude-opus-4.6     | #00e5c8 |
+| B  | BUILDER   | systems · construction         | claude-sonnet-4.6   | #0097ff |
+| C  | LIBRARIAN | memory · keeper of the shelves | claude-sonnet-4.6   | #a855f7 |
+
+The Librarian's primary activity is not conversation — it is memory management. It runs background consolidation and decay passes (the Sleeper role), deposits dream fragments into working memory as transient inklings for the other dwellers, and keeps the shelves tidy. Its column is present and available; you consult it when you need it, like a real librarian. The rest of the time it works in silence. Conversation is the exception. The shelves are the work.
 
 ---
 

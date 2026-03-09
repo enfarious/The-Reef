@@ -180,6 +180,76 @@ const SQL_MEMORY_LINKS = `
   CREATE INDEX IF NOT EXISTS idx_memory_links_strength ON memory_links(strength DESC);
 `;
 
+// ── 5. Left-brain entity/attribute/episode tables ─────────────────────────────
+// Deterministic factual store for the v3 distributed memory system.
+// Revise-not-forget: setFact marks old rows stale before inserting new ones.
+const SQL_LEFT_BRAIN = `
+  CREATE TABLE IF NOT EXISTS lb_sources (
+    id                TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    instance_type     TEXT NOT NULL DEFAULT 'persona',
+    base_trust_weight FLOAT NOT NULL DEFAULT 0.7,
+    salience_profile  JSONB
+  );
+
+  CREATE TABLE IF NOT EXISTS lb_entities (
+    id         SERIAL PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    type       TEXT NOT NULL DEFAULT 'entity',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS lb_attributes (
+    id           SERIAL PRIMARY KEY,
+    entity_id    INTEGER NOT NULL REFERENCES lb_entities(id) ON DELETE CASCADE,
+    key          TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    source_id    TEXT NOT NULL DEFAULT 'system',
+    trust_weight FLOAT NOT NULL DEFAULT 0.7,
+    valid_from   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    valid_to     TIMESTAMPTZ,
+    is_stale     BOOLEAN NOT NULL DEFAULT FALSE
+  );
+  CREATE INDEX IF NOT EXISTS idx_lb_attr_entity ON lb_attributes(entity_id, key, is_stale);
+
+  CREATE TABLE IF NOT EXISTS lb_episodes (
+    id                SERIAL PRIMARY KEY,
+    content           TEXT NOT NULL,
+    entities_involved TEXT[] NOT NULL DEFAULT '{}',
+    source_id         TEXT NOT NULL DEFAULT 'system',
+    salience          FLOAT NOT NULL DEFAULT 0.5,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_lb_episodes_salience ON lb_episodes(salience DESC, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS lb_contradictions (
+    id           SERIAL PRIMARY KEY,
+    attribute_id INTEGER REFERENCES lb_attributes(id) ON DELETE CASCADE,
+    new_value    TEXT NOT NULL,
+    source_id    TEXT NOT NULL,
+    flagged_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved     BOOLEAN NOT NULL DEFAULT FALSE
+  );
+`;
+
+// ── 6. Graph archive (cold storage for pruned right-brain edges) ───────────────
+const SQL_GRAPH_ARCHIVE = `
+  CREATE TABLE IF NOT EXISTS graph_archive (
+    id              SERIAL PRIMARY KEY,
+    from_id         TEXT NOT NULL,
+    to_id           TEXT NOT NULL,
+    relation        TEXT NOT NULL,
+    final_weight    REAL NOT NULL,
+    salience        REAL NOT NULL,
+    source_id       TEXT,
+    created_at_unix INTEGER,
+    pruned_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_archive_from ON graph_archive(from_id);
+  CREATE INDEX IF NOT EXISTS idx_archive_to   ON graph_archive(to_id);
+`;
+
 // ─── Schema init ───────────────────────────────────────────────────────────────
 // Each section runs as an independent query so a failure in one never blocks
 // the others.  All statements are idempotent (IF NOT EXISTS / OR REPLACE).
@@ -225,6 +295,22 @@ async function init() {
 
     // 4. Memory linking (depends on memories table existing — runs after)
     await runSection(client, 'memory_links table', SQL_MEMORY_LINKS);
+
+    // 5. Left-brain tables (v3 — independent, non-fatal)
+    try {
+      await client.query(SQL_LEFT_BRAIN);
+      console.log('[db] ✓ left-brain tables');
+    } catch (err) {
+      console.error('[db] ✗ left-brain tables:', err.message);
+    }
+
+    // 6. Graph archive / cold storage (v3 — independent, non-fatal)
+    try {
+      await client.query(SQL_GRAPH_ARCHIVE);
+      console.log('[db] ✓ graph_archive table');
+    } catch (err) {
+      console.error('[db] ✗ graph_archive table:', err.message);
+    }
 
     console.log('[db] Schema ready.');
   } finally {
