@@ -105,6 +105,14 @@ registry.set('graph.arbitrate',        arbitration.runAutoResolve);
 registry.set('graph.arbitrate.list',   arbitration.listPending);
 registry.set('graph.arbitrate.resolve',arbitration.resolve);
 
+const decayScheduler = require('./decay-scheduler');
+registry.set('graph.runDecayPass',   decayScheduler.runPass);
+registry.set('graph.decayStatus',    decayScheduler.status);
+
+const coldStorage = require('./cold-storage');
+registry.set('cold_storage.retrieve', coldStorage.retrieve);
+registry.set('cold_storage.stats',    coldStorage.stats);
+
 module.exports = {
   get: (name) => registry.get(name),
   list: () => [...registry.keys()],

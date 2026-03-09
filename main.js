@@ -7,9 +7,10 @@ const skills    = require('./skills/index');
 const llm       = require('./skills/llm');
 const db        = require('./skills/db');
 const config    = require('./skills/config');
-const mcpServer  = require('./skills/mcp-server');
-const rightBrain = require('./skills/right-brain');
-const broker     = require('./skills/broker');
+const mcpServer       = require('./skills/mcp-server');
+const rightBrain      = require('./skills/right-brain');
+const broker          = require('./skills/broker');
+const decayScheduler  = require('./skills/decay-scheduler');
 
 // Port of the local MCP tool server (assigned at startup, null until ready)
 let mcpPort = null;
@@ -197,6 +198,11 @@ app.whenReady().then(async () => {
     console.error('[main] right-brain init failed — graph memory unavailable:', err.message);
   });
 
+  // ── Decay scheduler ───────────────────────────────────────────────────────────
+  // Starts the self-rescheduling maintenance loop (6-hour default interval).
+  // Also exposed as graph.runDecayPass skill for manual Librarian-triggered passes.
+  decayScheduler.start({ intervalMs: 6 * 60 * 60 * 1000, pruneThreshold: 0.1 });
+
   // ── MCP tool server ───────────────────────────────────────────────────────────
   // Starts a local JSON-RPC 2.0 HTTP server that exposes our built-in skills to
   // LM Studio v1 via the `integrations.ephemeral_mcp` mechanism.  The OS picks a
@@ -290,6 +296,10 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  decayScheduler.stop();
 });
 
 // ─── IPC: skill router ────────────────────────────────────────────────────────

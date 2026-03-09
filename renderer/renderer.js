@@ -1623,6 +1623,16 @@ const TOOL_DEFS = [
       properties: {},
     },
   },
+  {
+    name: 'graph_decay_pass', skillName: 'graph.runDecayPass',
+    description: 'Manually trigger a graph maintenance pass outside the scheduled 6-hour window. Decays edge weights by salience tier, prunes edges below the threshold into cold storage, and sweeps expired working memory items. Call during your Sleeper cycle if memory feels cluttered or after a large consolidation run.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pruneThreshold: { type: 'number', description: 'Edge weight below which edges are pruned to cold storage (default 0.1). Lower = keep more; higher = prune more aggressively.' },
+      },
+    },
+  },
 ];
 
 // tool name → IPC skill name (colony_ask handled separately)
