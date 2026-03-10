@@ -10,10 +10,10 @@ export function collectConfig() {
   const cycleNum = document.getElementById('cycleNumber').value.trim() || '001';
   const cfg = { global: { cycle: 'CYCLE_' + cycleNum } };
   PERSONAS.forEach(p => {
-    const rawEndpoint = document.getElementById(`endpoint-${p.id}`).value;
-    const endpointToSave = (
-      state.claudeProxyEndpoint && rawEndpoint === state.claudeProxyEndpoint
-    ) ? 'claude-cli' : rawEndpoint;
+    const endpointEl    = document.getElementById(`endpoint-${p.id}`);
+    const rawEndpoint   = endpointEl.value;
+    const isCliProxy    = endpointEl.dataset.claudeCli === '1';
+    const endpointToSave = isCliProxy ? 'claude-cli' : rawEndpoint;
     cfg[p.id] = {
       endpoint:     endpointToSave,
       model:        document.getElementById(`model-${p.id}`).value,
@@ -61,12 +61,21 @@ export function applyConfig(cfg) {
     const pc = cfg[p.id];
     if (!pc) return;
     if (pc.endpoint) {
-      const resolved = pc.endpoint === 'claude-cli'
-        ? (state.claudeProxyEndpoint || 'claude-cli')
-        : pc.endpoint;
-      document.getElementById(`endpoint-${p.id}`).value = resolved;
-      document.getElementById(`endpoint-${p.id}`).dataset.claudeCli =
-        pc.endpoint === 'claude-cli' ? '1' : '';
+      const isCli = pc.endpoint === 'claude-cli';
+      const input = document.getElementById(`endpoint-${p.id}`);
+      if (isCli) {
+        // Resolve to proxy URL if available; otherwise leave blank with
+        // a placeholder — resolveClaudeCliEndpoints() fills it in once
+        // the proxy info arrives.  Never put the literal 'claude-cli'
+        // string into the input value (it's not a valid URL).
+        input.value       = state.claudeProxyEndpoint || '';
+        input.placeholder = state.claudeProxyEndpoint ? '' : 'claude-cli (waiting for proxy\u2026)';
+        input.dataset.claudeCli = '1';
+      } else {
+        input.value       = pc.endpoint;
+        input.placeholder = '';
+        input.dataset.claudeCli = '';
+      }
     }
     if (pc.model)        document.getElementById(`model-${p.id}`).value       = pc.model;
     if (pc.systemPrompt) state.config[p.id].systemPrompt = pc.systemPrompt;

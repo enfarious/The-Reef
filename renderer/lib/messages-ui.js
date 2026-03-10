@@ -8,6 +8,49 @@ import { thinkingTimers } from './abort.js';
 let _abortPersona;
 export function setAbortCallback(fn) { _abortPersona = fn; }
 
+// ─── Tool accumulator — groups tool calls into a single bubble ──────────────
+
+const toolAccumulators = {};
+
+function getOrCreateToolAccumulator(id) {
+  if (!toolAccumulators[id]) {
+    const msgs = document.getElementById(`msgs-${id}`);
+    const div = document.createElement('div');
+    div.className = 'message assistant-msg tool-accumulator';
+    const thinkInd = document.getElementById(`thinking-${id}`);
+    if (thinkInd) msgs.insertBefore(div, thinkInd);
+    else          msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+    toolAccumulators[id] = div;
+  }
+  return toolAccumulators[id];
+}
+
+export function adoptBubbleAsAccumulator(id, bubble, pretextContent = null) {
+  if (toolAccumulators[id]) {
+    // Accumulator already exists from a prior iteration — discard this bubble
+    bubble.remove();
+    if (pretextContent) {
+      const el = document.createElement('div');
+      el.className = 'msg-bubble tool-pretext';
+      el.innerHTML = formatMd(escHtml(pretextContent));
+      toolAccumulators[id].appendChild(el);
+    }
+    return;
+  }
+  bubble.className = 'message assistant-msg tool-accumulator';
+  bubble.innerHTML = pretextContent
+    ? `<div class="msg-bubble tool-pretext">${formatMd(escHtml(pretextContent))}</div>`
+    : '';
+  toolAccumulators[id] = bubble;
+}
+
+export function clearToolAccumulator(id) {
+  delete toolAccumulators[id];
+}
+
+// ─── Message append functions ───────────────────────────────────────────────
+
 export function appendUserMsg(id, displayText, modelContent = null) {
   const msgs = document.getElementById(`msgs-${id}`);
   const empty = document.getElementById(`empty-${id}`);
@@ -37,21 +80,33 @@ export function appendUserMsg(id, displayText, modelContent = null) {
 
 export function appendAssistantMsg(id, text, reasoning = null, stats = null) {
   const msgs = document.getElementById(`msgs-${id}`);
-  const div  = document.createElement('div');
-  div.className = 'message assistant-msg';
 
-  let reasoningHtml = '';
-  if (reasoning) {
-    const ruid = `r-${id}-${Date.now()}`;
-    reasoningHtml = `
-      <div class="reasoning-block" id="${ruid}">
-        <button class="reasoning-toggle" data-block-toggle="${ruid}">
-          <span class="reasoning-arrow">▸</span> REASONING
-        </button>
-        <div class="reasoning-body">${escHtml(String(reasoning))}</div>
-      </div>`;
+  // Consume any accumulated tool content
+  const acc = toolAccumulators[id];
+  delete toolAccumulators[id];
+
+  const div = acc || document.createElement('div');
+  if (acc) {
+    div.classList.remove('tool-accumulator');
+  } else {
+    div.className = 'message assistant-msg';
   }
 
+  // Reasoning block (after tools, before text)
+  if (reasoning) {
+    const ruid = `r-${id}-${Date.now()}`;
+    const rBlock = document.createElement('div');
+    rBlock.className = 'reasoning-block';
+    rBlock.id = ruid;
+    rBlock.innerHTML = `
+      <button class="reasoning-toggle" data-block-toggle="${ruid}">
+        <span class="reasoning-arrow">▸</span> REASONING
+      </button>
+      <div class="reasoning-body">${escHtml(String(reasoning))}</div>`;
+    div.appendChild(rBlock);
+  }
+
+  // Message text
   let metaExtra = '';
   if (stats) {
     const tps  = stats.tokens_per_second     != null ? `${stats.tokens_per_second.toFixed(1)} tok/s` : null;
@@ -60,18 +115,22 @@ export function appendAssistantMsg(id, text, reasoning = null, stats = null) {
     if (parts.length) metaExtra = ` · ${parts.join(' · ')}`;
   }
 
-  div.innerHTML = `
-    ${reasoningHtml}
-    <div class="msg-bubble">${formatMd(escHtml(text))}</div>
-    <div class="msg-meta-row">
-      <span class="msg-meta">${timestamp()}${escHtml(metaExtra)}</span>
-      <span class="msg-actions">
-        <button class="msg-edit-btn" title="Edit">✎</button>
-        <button class="msg-delete-btn" title="Remove from context">×</button>
-      </span>
-    </div>
-  `;
-  msgs.appendChild(div);
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.innerHTML = formatMd(escHtml(text));
+  div.appendChild(bubble);
+
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta-row';
+  meta.innerHTML = `
+    <span class="msg-meta">${timestamp()}${escHtml(metaExtra)}</span>
+    <span class="msg-actions">
+      <button class="msg-edit-btn" title="Edit">✎</button>
+      <button class="msg-delete-btn" title="Remove from context">×</button>
+    </span>`;
+  div.appendChild(meta);
+
+  if (!acc) msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
   return div;
 }
@@ -86,40 +145,42 @@ export function appendError(id, msg) {
 }
 
 export function appendToolTextMsg(id, text) {
+  const acc = getOrCreateToolAccumulator(id);
+  const el = document.createElement('div');
+  el.className = 'msg-bubble tool-pretext';
+  el.innerHTML = formatMd(escHtml(text));
+  acc.appendChild(el);
   const msgs = document.getElementById(`msgs-${id}`);
-  const div  = document.createElement('div');
-  div.className = 'message assistant-msg';
-  div.innerHTML = `<div class="msg-bubble" style="opacity:0.7;font-style:italic">${formatMd(escHtml(text))}</div>`;
-  msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
 export function appendToolCallIndicator(id, toolName, input) {
-  const msgs    = document.getElementById(`msgs-${id}`);
-  const div     = document.createElement('div');
-  div.className = 'message assistant-msg';
+  const acc     = getOrCreateToolAccumulator(id);
   const tcuid   = `tc-${id}-${Date.now()}`;
   const display = toolName.replace(/_/g, '.');
   const args    = JSON.stringify(input, null, 2);
-  div.innerHTML = `
-    <div class="reasoning-block tool-call-block" id="${tcuid}">
-      <button class="reasoning-toggle tool-toggle" data-block-toggle="${tcuid}">
-        <span class="reasoning-arrow">▸</span> ⟐ ${escHtml(display)}
-      </button>
-      <div class="reasoning-body">${escHtml(args)}</div>
-    </div>`;
-  msgs.appendChild(div);
+  const block   = document.createElement('div');
+  block.className = 'reasoning-block tool-call-block';
+  block.id = tcuid;
+  block.innerHTML = `
+    <button class="reasoning-toggle tool-toggle" data-block-toggle="${tcuid}">
+      <span class="reasoning-arrow">▸</span> ⟐ ${escHtml(display)}
+    </button>
+    <div class="reasoning-body">${escHtml(args)}</div>`;
+  acc.appendChild(block);
+  const msgs = document.getElementById(`msgs-${id}`);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
 export function appendToolResultIndicator(id, toolName, resultStr) {
-  const msgs    = document.getElementById(`msgs-${id}`);
-  const div     = document.createElement('div');
-  div.className = 'message assistant-msg';
+  const acc     = getOrCreateToolAccumulator(id);
   const display = toolName.replace(/_/g, '.');
   const preview = resultStr.length > 280 ? resultStr.slice(0, 280) + '…' : resultStr;
-  div.innerHTML = `<div class="skill-indicator">✓ ${escHtml(display)} · <span style="opacity:0.65;font-style:italic">${escHtml(preview)}</span></div>`;
-  msgs.appendChild(div);
+  const el      = document.createElement('div');
+  el.className = 'skill-indicator';
+  el.innerHTML = `✓ ${escHtml(display)} · <span style="opacity:0.65;font-style:italic">${escHtml(preview)}</span>`;
+  acc.appendChild(el);
+  const msgs = document.getElementById(`msgs-${id}`);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
@@ -187,7 +248,17 @@ export function setThinking(id, thinking) {
   }
 }
 
-export function finalizeStreamingBubble(bubble, text, reasoning, stats) {
+export function finalizeStreamingBubble(id, bubble, text, reasoning, stats) {
+  // Consume any accumulated tool content
+  const acc = toolAccumulators[id];
+  delete toolAccumulators[id];
+
+  let toolContentHtml = '';
+  if (acc) {
+    toolContentHtml = acc.innerHTML;
+    acc.remove();
+  }
+
   let reasoningHtml = '';
   if (reasoning) {
     const ruid = `r-${Date.now()}`;
@@ -210,6 +281,7 @@ export function finalizeStreamingBubble(bubble, text, reasoning, stats) {
 
   bubble.className = 'message assistant-msg';
   bubble.innerHTML = `
+    ${toolContentHtml}
     ${reasoningHtml}
     <div class="msg-bubble">${formatMd(escHtml(text))}</div>
     <div class="msg-meta-row">

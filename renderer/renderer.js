@@ -23,6 +23,7 @@ import {
   setAbortCallback, appendUserMsg, appendAssistantMsg, appendError,
   appendToolTextMsg, appendToolCallIndicator, appendToolResultIndicator,
   appendOperatorBadge, setThinking, finalizeStreamingBubble,
+  adoptBubbleAsAccumulator, clearToolAccumulator,
 } from './lib/messages-ui.js';
 import { setToolExecCallbacks, executeTool }                   from './lib/tool-exec.js';
 import { setSchedulerCallbacks }                               from './lib/scheduler.js';
@@ -168,6 +169,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       ? await callPersonaStream(id, tools, v1Integrations, callOpts)
       : await callPersonaOnce(id, tools, v1Integrations, callOpts);
     if (!result) {
+      clearToolAccumulator(id);
       setThinking(id, false);
       if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
@@ -185,22 +187,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
 
     // ── No tool calls (or last step) — render final response and stop ────────
     if (!toolUse?.length || isLastStep) {
-      if (text) {
-        const msgId = uid();
-        let aDiv;
-        if (result._bubble) {
-          aDiv = finalizeStreamingBubble(result._bubble, text, reasoning ?? null, stats ?? null);
-        } else {
-          aDiv = appendAssistantMsg(id, text, reasoning ?? null, stats ?? null);
-        }
-        if (!isHeartbeat) {
-          state.conversations[id].push({ _id: msgId, role: 'assistant', content: text });
-          if (aDiv) { aDiv.dataset.personaId = id; aDiv.dataset.msgId = msgId; }
-        }
-      } else if (result._bubble) {
-        result._bubble.remove();
-      }
-
+      // Server-side tool calls (LM Studio v1) — accumulate before message
       if (result.serverToolCalls?.length) {
         for (const tc of result.serverToolCalls) {
           const name  = tc.tool ?? tc.name ?? 'tool';
@@ -212,6 +199,23 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
         }
       }
 
+      if (text) {
+        const msgId = uid();
+        let aDiv;
+        if (result._bubble) {
+          aDiv = finalizeStreamingBubble(id, result._bubble, text, reasoning ?? null, stats ?? null);
+        } else {
+          aDiv = appendAssistantMsg(id, text, reasoning ?? null, stats ?? null);
+        }
+        if (!isHeartbeat) {
+          state.conversations[id].push({ _id: msgId, role: 'assistant', content: text });
+          if (aDiv) { aDiv.dataset.personaId = id; aDiv.dataset.msgId = msgId; }
+        }
+      } else if (result._bubble) {
+        result._bubble.remove();
+      }
+
+      clearToolAccumulator(id);
       setThinking(id, false);
       if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
@@ -219,15 +223,10 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
     }
 
     // ── Tool calls present — push assistant turn, execute, loop ─────────────
-    if (text) {
-      if (result._bubble) {
-        result._bubble.className = 'message assistant-msg';
-        result._bubble.innerHTML = `<div class="msg-bubble tool-pretext">${escHtml(text)}</div>`;
-      } else {
-        appendToolTextMsg(id, text);
-      }
-    } else if (result._bubble) {
-      result._bubble.remove();
+    if (result._bubble) {
+      adoptBubbleAsAccumulator(id, result._bubble, text || null);
+    } else if (text) {
+      appendToolTextMsg(id, text);
     }
 
     if (respMode === 'anthropic') {
@@ -238,11 +237,11 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       }
     } else {
       if (isHeartbeat) {
-        localMessages.push({ role: 'assistant', content: text ?? null, tool_calls: rawContent.tool_calls });
+        localMessages.push({ role: 'assistant', content: text ?? '', tool_calls: rawContent.tool_calls });
       } else {
         state.conversations[id].push({
           _id: uid(), role: 'assistant',
-          content: text ?? null,
+          content: text ?? '',
           tool_calls: rawContent.tool_calls,
         });
       }
@@ -328,6 +327,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
     }
   }
 
+  clearToolAccumulator(id);
   setThinking(id, false);
   if (!isHeartbeat) state.lastActivity[id] = Date.now();
   updateContextCounter(id);
@@ -665,9 +665,10 @@ function resolveClaudeCliEndpoints() {
     const input = document.getElementById(`endpoint-${p.id}`);
     if (!input) return;
     if (input.value === 'claude-cli' || input.dataset.claudeCli === '1') {
-      input.value = state.claudeProxyEndpoint;
+      input.value       = state.claudeProxyEndpoint;
+      input.placeholder = '';
       input.dataset.claudeCli = '1';
-      input.title = `Claude CLI OAuth proxy — ${state.claudeProxyEndpoint}`;
+      input.title = `Claude CLI OAuth proxy \u2014 ${state.claudeProxyEndpoint}`;
     }
     input.classList.toggle('oauth-proxy-active', input.dataset.claudeCli === '1');
   });

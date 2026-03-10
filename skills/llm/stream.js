@@ -10,8 +10,9 @@ const { streamOpenAI, streamAnthropic, streamLMStudioV1 } = require('./stream-pa
 // onChunk is called with normalised chunk objects (see streaming parsers above).
 
 async function stream({ endpoint, model, systemPrompt, apiKey, messages, previousResponseId, store, tools, integrations }, onChunk) {
-  if (!endpoint)         throw new Error('No endpoint configured for this persona.');
-  if (!messages?.length) throw new Error('No messages to send.');
+  if (!endpoint)                    throw new Error('No endpoint configured for this persona.');
+  if (endpoint === 'claude-cli')   throw new Error('Claude CLI proxy is not ready. Run "claude login" and restart the app.');
+  if (!messages?.length)           throw new Error('No messages to send.');
 
   const mode = detectMode(endpoint);
 

@@ -867,6 +867,15 @@ header {
   font-size: 0.78rem;
 }
 
+/* Tool accumulator — groups tool calls + result + final message in one bubble */
+.tool-accumulator > .skill-indicator {
+  margin-top: 2px;
+}
+.tool-accumulator > .tool-call-block,
+.message > .tool-call-block {
+  margin-top: 4px;
+}
+
 /* ─── Inspector window open buttons (footer row, right-aligned) ─────────────── */
 .inspector-btns {
   margin-left: auto;
