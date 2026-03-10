@@ -103,6 +103,12 @@ export function buildOperatorSection() {
   return lines.join('\n');
 }
 
+export function buildSessionSection() {
+  const cycle = state.config.global?.cycle || 'CYCLE_001';
+  const today = new Date().toISOString().slice(0, 10);
+  return `[SESSION]\nCycle: ${cycle}\nDate: ${today}`;
+}
+
 export function buildWorkspaceSection() {
   if (!state.cwd) return null;
   if (state.projectContext) return state.projectContext;

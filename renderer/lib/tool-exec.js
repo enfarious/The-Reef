@@ -3,7 +3,10 @@
 import { PERSONAS, state } from './state.js';
 import { SKILL_MAP } from './tools.js';
 import { appendTransmissionMsg, appendAssistantMsg, setThinking } from './messages-ui.js';
+import { thinkingTimers, abortPersona } from './abort.js';
 import { scheduleTask, cancelTask, listTasks } from './scheduler.js';
+
+const COLONY_ASK_TIMEOUT_MS = 90_000;  // 90s — must be shorter than maxThinkingTime
 
 // Injected callback — callPersonaOnce lives in the orchestrator
 let _callPersonaOnce;
@@ -98,11 +101,34 @@ async function executeColonyAsk(callerPersonaId, { to, message }) {
 
   state.conversations[targetId].push({ role: 'user', content: `[Transmission from ${callerName}] ${message}` });
 
-  setThinking(targetId, true);
-  const result = await _callPersonaOnce(targetId, []);  // no tools — no recursion
-  setThinking(targetId, false);
+  // Pause the caller's thinking timer so colony_ask doesn't trigger a false timeout
+  const callerTimer = thinkingTimers[callerPersonaId];
+  if (callerTimer) {
+    clearTimeout(callerTimer);
+    thinkingTimers[callerPersonaId] = null;
+  }
 
-  if (!result) throw new Error(`${targetPersona.name} did not respond`);
+  setThinking(targetId, true);
+
+  let result;
+  try {
+    result = await Promise.race([
+      _callPersonaOnce(targetId, []),  // no tools — no recursion
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${targetPersona.name} timed out after ${COLONY_ASK_TIMEOUT_MS / 1000}s`)),
+          COLONY_ASK_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (err) {
+    setThinking(targetId, false);
+    restoreCallerTimer(callerPersonaId);
+    return `Error: ${err.message}`;
+  }
+
+  setThinking(targetId, false);
+  restoreCallerTimer(callerPersonaId);
+
+  if (!result) return `Error: ${targetPersona.name} did not respond`;
 
   const responseText = result.text ?? '[no response]';
   if (result.responseId) state.lastResponseId[targetId] = result.responseId;
@@ -111,4 +137,15 @@ async function executeColonyAsk(callerPersonaId, { to, message }) {
   appendAssistantMsg(targetId, responseText, result.reasoning ?? null, result.stats ?? null);
 
   return responseText;
+}
+
+// Re-arm the caller's thinking timer with a fresh window after colony_ask completes
+function restoreCallerTimer(id) {
+  if (!state.thinking[id]) return;
+  const maxSecs = state.config.settings?.maxThinkingTime ?? 120;
+  if (maxSecs <= 0) return;
+  if (thinkingTimers[id]) clearTimeout(thinkingTimers[id]);
+  thinkingTimers[id] = setTimeout(() => {
+    if (state.thinking[id]) abortPersona(id, '⏱ TIMED OUT');
+  }, maxSecs * 1000);
 }
