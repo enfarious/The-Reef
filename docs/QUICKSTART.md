@@ -37,7 +37,7 @@ sudo systemctl status postgresql
 ## Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/your-repo/the-reef.git
+git clone https://github.com/enfarious/the-reef.git
 cd the-reef
 copy db.config.example.json db.config.json
 ```
