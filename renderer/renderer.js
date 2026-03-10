@@ -14,7 +14,7 @@ import { scheduleSave, applyConfig, initConfigListeners }      from './lib/confi
 import {
   setCompactCallback, getContextWindow, maybeAutoCompact,
   COMPACT_PROMPT, updateContextCounter, buildOperatorSection,
-  buildWorkspaceSection, scanProject, updateCwdDisplay, personaHasApiAccess,
+  buildWorkspaceSection, buildSessionSection, scanProject, updateCwdDisplay, personaHasApiAccess,
 } from './lib/context.js';
 import { setHeartbeatCallbacks, runHeartbeatFor, startHeartbeat, HEARTBEAT_PROMPT } from './lib/heartbeat.js';
 import { parseAtMentions }                                     from './lib/mentions.js';
@@ -250,7 +250,9 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
     toolCallsExecuted += toolUse.length;
     const toolResults = [];
     for (const tc of toolUse) {
-      appendToolCallIndicator(id, tc.name, tc.input);
+      if (!result._streamedToolIds?.has(tc.id ?? tc.name)) {
+        appendToolCallIndicator(id, tc.name, tc.input);
+      }
       let resultStr;
       let imageData = null;
       try {
@@ -343,8 +345,10 @@ async function callPersonaOnce(id, tools = [], integrations = undefined, opts = 
 
   let systemPrompt = basePrompt ? basePrompt + '\n\n' + entityPrompt : entityPrompt;
   const operatorSection  = buildOperatorSection();
+  const sessionSection   = buildSessionSection();
   const workspaceSection = buildWorkspaceSection();
   if (operatorSection)  systemPrompt += '\n\n' + operatorSection;
+  if (sessionSection)   systemPrompt += '\n\n' + sessionSection;
   if (workspaceSection) systemPrompt += '\n\n' + workspaceSection;
 
   const apiKey = document.getElementById(`apikey-${id}`).value.trim()
@@ -387,8 +391,10 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
 
   let systemPrompt = basePrompt ? basePrompt + '\n\n' + entityPrompt : entityPrompt;
   const operatorSection  = buildOperatorSection();
+  const sessionSection   = buildSessionSection();
   const workspaceSection = buildWorkspaceSection();
   if (operatorSection)  systemPrompt += '\n\n' + operatorSection;
+  if (sessionSection)   systemPrompt += '\n\n' + sessionSection;
   if (workspaceSection) systemPrompt += '\n\n' + workspaceSection;
 
   const apiKey = document.getElementById(`apikey-${id}`).value.trim()
@@ -418,7 +424,7 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
       <div class="stream-reasoning-body"></div>
     </div>
     <div class="stream-tool-strip" style="display:none"></div>
-    <div class="stream-text-wrap">
+    <div class="stream-text-wrap" style="display:none">
       <span class="stream-text"></span><span class="stream-cursor">▌</span>
     </div>`;
 
@@ -428,6 +434,7 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
   msgs.scrollTop = msgs.scrollHeight;
 
   const streamTextEl     = bubble.querySelector('.stream-text');
+  const streamTextWrap   = bubble.querySelector('.stream-text-wrap');
   const streamReasonEl   = bubble.querySelector('.stream-reasoning-body');
   const streamReasonWrap = bubble.querySelector('.stream-reasoning-wrap');
   const streamToolStrip  = bubble.querySelector('.stream-tool-strip');
@@ -441,6 +448,10 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
         accText += chunk.delta;
         if (streamTextEl) {
           streamTextEl.textContent = accText;
+          // Show text wrap only once non-whitespace content arrives
+          if (streamTextWrap.style.display === 'none' && accText.trim()) {
+            streamTextWrap.style.display = '';
+          }
           msgs.scrollTop = msgs.scrollHeight;
         }
         break;
@@ -455,6 +466,32 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
         if (streamToolStrip && chunk.name) {
           streamToolStrip.style.display = '';
           streamToolStrip.textContent = `▶ ${chunk.name}…`;
+        }
+        break;
+      case 'tool_done':
+        // Hide the "in progress" strip
+        if (streamToolStrip) streamToolStrip.style.display = 'none';
+        if (chunk.name) {
+          const tcuid = `tc-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const display = chunk.name.replace(/_/g, '.');
+          const args = JSON.stringify(chunk.input ?? {}, null, 2);
+          const block = document.createElement('div');
+          block.className = 'reasoning-block tool-call-block';
+          block.id = tcuid;
+          block.innerHTML = `
+            <button class="reasoning-toggle tool-toggle" data-block-toggle="${tcuid}">
+              <span class="reasoning-arrow">▸</span> ⟐ ${escHtml(display)}
+            </button>
+            <div class="reasoning-body">${escHtml(args)}</div>`;
+          // Insert before the streaming elements (tools appear at top)
+          const firstStreamEl = bubble.querySelector('.stream-reasoning-wrap')
+            || bubble.querySelector('.stream-tool-strip')
+            || bubble.querySelector('.stream-text-wrap');
+          if (firstStreamEl) bubble.insertBefore(block, firstStreamEl);
+          else                bubble.appendChild(block);
+          if (!bubble._streamedToolIds) bubble._streamedToolIds = new Set();
+          bubble._streamedToolIds.add(chunk.id ?? chunk.name);
+          msgs.scrollTop = msgs.scrollHeight;
         }
         break;
       case 'stats':
@@ -492,6 +529,7 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
 
   const result = response.result;
   result._bubble = bubble;
+  if (bubble._streamedToolIds) result._streamedToolIds = bubble._streamedToolIds;
   return result;
 }
 

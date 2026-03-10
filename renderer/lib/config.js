@@ -113,6 +113,10 @@ export function initConfigListeners() {
     if (e.target.matches('.endpoint-input')) {
       const col = e.target.closest('[data-persona]');
       if (col) state.lastResponseId[col.dataset.persona] = null;
+      // User manually edited the endpoint — clear the claude-cli proxy flag
+      e.target.dataset.claudeCli = '';
+      e.target.title = '';
+      e.target.classList.remove('oauth-proxy-active');
     }
     if (e.target.id === 'userInput') resizeTextarea(e.target);
   });

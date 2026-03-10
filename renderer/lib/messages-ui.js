@@ -28,7 +28,10 @@ function getOrCreateToolAccumulator(id) {
 
 export function adoptBubbleAsAccumulator(id, bubble, pretextContent = null) {
   if (toolAccumulators[id]) {
-    // Accumulator already exists from a prior iteration — discard this bubble
+    // Accumulator already exists from a prior iteration — move streamed tool blocks, discard bubble
+    for (const block of bubble.querySelectorAll('.tool-call-block')) {
+      toolAccumulators[id].appendChild(block);
+    }
     bubble.remove();
     if (pretextContent) {
       const el = document.createElement('div');
@@ -38,10 +41,17 @@ export function adoptBubbleAsAccumulator(id, bubble, pretextContent = null) {
     }
     return;
   }
+  // First time — convert bubble to accumulator, preserving any tool-call-blocks from streaming
+  const toolBlocks = [...bubble.querySelectorAll('.tool-call-block')];
   bubble.className = 'message assistant-msg tool-accumulator';
-  bubble.innerHTML = pretextContent
-    ? `<div class="msg-bubble tool-pretext">${formatMd(escHtml(pretextContent))}</div>`
-    : '';
+  bubble.innerHTML = '';
+  for (const block of toolBlocks) bubble.appendChild(block);
+  if (pretextContent) {
+    const el = document.createElement('div');
+    el.className = 'msg-bubble tool-pretext';
+    el.innerHTML = formatMd(escHtml(pretextContent));
+    bubble.appendChild(el);
+  }
   toolAccumulators[id] = bubble;
 }
 
@@ -253,9 +263,13 @@ export function finalizeStreamingBubble(id, bubble, text, reasoning, stats) {
   const acc = toolAccumulators[id];
   delete toolAccumulators[id];
 
+  // Collect tool-call-blocks: first from the streaming bubble itself, then from the accumulator
   let toolContentHtml = '';
+  for (const block of bubble.querySelectorAll('.tool-call-block')) {
+    toolContentHtml += block.outerHTML;
+  }
   if (acc) {
-    toolContentHtml = acc.innerHTML;
+    toolContentHtml += acc.innerHTML;
     acc.remove();
   }
 
