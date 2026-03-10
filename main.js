@@ -10,6 +10,7 @@ const config    = require('./skills/config');
 const mcpServer       = require('./skills/mcp-server');
 const rightBrain      = require('./skills/right-brain');
 const broker          = require('./skills/broker');
+const claudeProxy     = require('./skills/claude-proxy');
 const decayScheduler  = require('./skills/decay-scheduler');
 
 // Port of the local MCP tool server (assigned at startup, null until ready)
@@ -180,6 +181,23 @@ app.whenReady().then(async () => {
     console.error('[main] DB init failed — memory system unavailable:', err.message);
   }
 
+  // ── Claude CLI OAuth proxy ────────────────────────────────────────────────────
+  // Starts a loopback HTTP server that reads ~/.claude/.credentials.json and
+  // proxies POST /v1/messages to api.anthropic.com using the OAuth token.
+  // Personas configured with endpoint = claudeProxy.endpoint() get free-tier
+  // inference through your Claude subscription instead of API billing.
+  try {
+    await claudeProxy.start();
+    const status = claudeProxy.credentialStatus();
+    if (status.ok) {
+      console.log('[main] Claude proxy ready:', claudeProxy.endpoint());
+    } else {
+      console.warn('[main] Claude proxy started but credentials unavailable:', status.message);
+    }
+  } catch (err) {
+    console.error('[main] Claude proxy failed to start:', err.message);
+  }
+
   // ── Broker source registry + trust weights ───────────────────────────────────
   // Seeds personas into lb_sources, then loads weights into the in-memory cache.
   broker.seedSources()
@@ -300,6 +318,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   decayScheduler.stop();
+  claudeProxy.stop();
 });
 
 // ─── IPC: skill router ────────────────────────────────────────────────────────
@@ -328,6 +347,15 @@ ipcMain.handle('skill:run', async (_event, skillName, args) => {
 // Renderer queries this once on startup to know where the local MCP server is.
 
 ipcMain.handle('mcp:port', () => mcpPort);
+
+// ─── IPC: Claude CLI proxy info ───────────────────────────────────────────────
+// Returns { endpoint, status } so the renderer can resolve "claude-cli" sentinels
+// and show credential health in the UI.
+
+ipcMain.handle('claude-proxy:info', () => ({
+  endpoint: claudeProxy.endpoint(),
+  status:   claudeProxy.credentialStatus(),
+}));
 
 // ─── IPC: Inspector windows ───────────────────────────────────────────────────
 // Opens a standalone BrowserWindow for memory browser, messages, or archive.
@@ -369,19 +397,40 @@ ipcMain.handle('window:open', (_event, type) => {
 //
 // The renderer registers a listener for 'llm:stream:event' before calling this
 // handler so it can process live chunks while awaiting the invoke result.
+// Active stream promises are tracked so the renderer can abort them mid-flight.
+
+const activeStreamRegistry = new Map();  // streamId → promise with .abort()
 
 ipcMain.handle('llm:stream:start', async (event, streamId, args) => {
   try {
-    const result = await llm.stream(args, (chunk) => {
+    const promise = llm.stream(args, (chunk) => {
       // Guard: window may have been closed before the stream finishes
       if (!event.sender.isDestroyed()) {
         event.sender.send('llm:stream:event', streamId, chunk);
       }
     });
+    activeStreamRegistry.set(streamId, promise);
+    const result = await promise;
+    activeStreamRegistry.delete(streamId);
     return { ok: true, result };
   } catch (err) {
+    activeStreamRegistry.delete(streamId);
+    // Destroyed/aborted connections produce ECONNRESET or 'aborted' — treat as
+    // a clean stop rather than a hard error so the renderer doesn't show a red bubble.
+    const isAbort = /aborted|ECONNRESET|ECONNABORTED/i.test(err.message || '');
+    if (isAbort) return { ok: false, error: null, aborted: true };
     return { ok: false, error: err.message };
   }
+});
+
+// Renderer calls this to kill an in-flight stream immediately.
+ipcMain.handle('llm:stream:abort', (_event, streamId) => {
+  const promise = activeStreamRegistry.get(streamId);
+  if (promise?.abort) {
+    promise.abort('interrupted');
+    activeStreamRegistry.delete(streamId);
+  }
+  return { ok: true };
 });
 
 // ─── IPC: confirmation bridge ─────────────────────────────────────────────────

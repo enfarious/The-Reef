@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('reef', {
   // Used to build `integrations` for LM Studio v1 requests.
   mcpPort: () => ipcRenderer.invoke('mcp:port'),
 
+  // ─── Claude CLI OAuth proxy ───────────────────────────────────────────────
+  // Returns { endpoint: string|null, status: { ok: boolean, message: string } }
+  // Use in Settings to show whether the proxy is active and credentials are valid.
+  // Set a persona's endpoint to the returned endpoint URL to route through OAuth.
+  claudeProxyInfo: () => ipcRenderer.invoke('claude-proxy:info'),
+
   // ─── Inspector windows ────────────────────────────────────────────────────────
   // Opens a separate BrowserWindow for memory browser, messages, or archive.
   openWindow: (type) => ipcRenderer.invoke('window:open', type),
@@ -31,6 +37,7 @@ contextBridge.exposeInMainWorld('reef', {
   // onStreamEvent(cb) — register a listener for normalised stream chunks.
   //   Returns a cleanup function: call it to stop receiving events when done.
   streamLLM: (streamId, args) => ipcRenderer.invoke('llm:stream:start', streamId, args),
+  abortStream: (streamId) => ipcRenderer.invoke('llm:stream:abort', streamId),
   onStreamEvent: (cb) => {
     const handler = (_event, streamId, chunk) => cb(streamId, chunk);
     ipcRenderer.on('llm:stream:event', handler);

@@ -23,7 +23,10 @@ function db() { return rightBrain.getDb(); }
 // Also creates a right-brain graph node for the item so consolidation can embed it.
 // args: { personaId, content, salience?, highSalience? }
 
-async function write({ personaId, content, salience = 0.5, highSalience = false } = {}) {
+async function write({ personaId, persona_id, content, salience = 0.5, highSalience = false, high_salience } = {}) {
+  // Accept both camelCase and snake_case variants (small models often generate snake_case)
+  personaId    = personaId    ?? persona_id;
+  highSalience = highSalience ?? high_salience ?? false;
   if (!personaId) throw new Error('working_memory.write: personaId is required');
   if (!content)   throw new Error('working_memory.write: content is required');
 
@@ -92,7 +95,9 @@ function reinforce({ id } = {}) {
 // Also returns items written with persona_id = 'all' (dream fragments for everyone).
 // args: { personaId, includeAll? }
 
-function read({ personaId, includeAll = true } = {}) {
+function read({ personaId, persona_id, includeAll = true, include_all } = {}) {
+  personaId  = personaId  ?? persona_id;
+  includeAll = includeAll ?? include_all ?? true;
   if (!personaId) throw new Error('working_memory.read: personaId is required');
   const d = db();
   const now = Math.floor(Date.now() / 1000);
@@ -118,7 +123,8 @@ function read({ personaId, includeAll = true } = {}) {
 // Items that have earned consolidation eligibility: 2+ appearances OR high-salience.
 // args: { personaId }
 
-function pendingConsolidation({ personaId } = {}) {
+function pendingConsolidation({ personaId, persona_id } = {}) {
+  personaId = personaId ?? persona_id;
   return db().prepare(`
     SELECT * FROM working_memory
     WHERE persona_id = ? AND consolidated = 0

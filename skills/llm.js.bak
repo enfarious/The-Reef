@@ -3,6 +3,67 @@
 const https = require('https');
 const http = require('http');
 
+// ─── Response sanitizer ─────────────────────────────────────────────────────
+// Small models frequently corrupt tool call JSON by appending extra text after
+// the closing brace, or by wrapping args in markdown fences.  This runs before
+// any parser sees the raw response body and attempts lightweight repairs.
+//
+// Repairs attempted (in order):
+//   1. Strip ```json … ``` / ``` … ``` fences wrapping the entire body
+//   2. For OpenAI tool_calls: extract the first valid JSON object from
+//      arguments strings that have trailing garbage after the closing }
+//   3. Truncate assistant content strings that bleed into the next JSON key
+//      (e.g. "content": "hello\n\nworking_memory_write[ARGS]{…}")
+
+function sanitizeToolCallArgs(argsStr) {
+  if (!argsStr || typeof argsStr !== 'string') return argsStr;
+  const s = argsStr.trim();
+  // Strip markdown fences
+  const fenced = s.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  if (fenced) return fenced[1].trim();
+  // Find the first top-level { … } and discard anything after it
+  let depth = 0, inStr = false, esc = false, end = -1;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (esc)          { esc = false; continue; }
+    if (c === '\\')   { esc = true;  continue; }
+    if (c === '"')    { inStr = !inStr; continue; }
+    if (inStr)        continue;
+    if (c === '{')    { depth++; continue; }
+    if (c === '}')    { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end !== -1 && end < s.length - 1) {
+    console.warn('[llm:sanitize] Truncated trailing garbage after tool args JSON');
+    return s.slice(0, end + 1);
+  }
+  return s;
+}
+
+function sanitizeResponse(data, mode) {
+  if (!data || typeof data !== 'object') return data;
+  try {
+    if (mode === 'anthropic') {
+      // Anthropic: tool_use blocks have an `input` object — already parsed, nothing to do
+      return data;
+    }
+    // OpenAI / LM Studio: tool_calls[].function.arguments is a JSON string
+    const choices = data.choices;
+    if (!Array.isArray(choices)) return data;
+    for (const choice of choices) {
+      const tcs = choice?.message?.tool_calls;
+      if (!Array.isArray(tcs)) continue;
+      for (const tc of tcs) {
+        if (tc?.function?.arguments) {
+          tc.function.arguments = sanitizeToolCallArgs(tc.function.arguments);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[llm:sanitize] sanitizeResponse failed:', e.message);
+  }
+  return data;
+}
+
 // ─── Mode detection ───────────────────────────────────────────────────────────
 // Returns: 'anthropic' | 'openai' | 'lmstudio' | 'lmstudio-v1'
 //
@@ -230,7 +291,7 @@ function httpStream(url, headers, body, { onEvent, onEnd, onError }) {
 //   { type: 'done' }                              — stream finished
 //   { type: 'error',     message }                — error
 
-function streamOpenAI(request, onChunk, resolve, reject, mode) {
+function streamOpenAI(request, onChunk, resolve, reject, mode, onRequest) {
   const accText  = [];
   const accReason = [];
   // tool_calls indexed by tc.index
@@ -238,7 +299,7 @@ function streamOpenAI(request, onChunk, resolve, reject, mode) {
   let inputTokens  = null;
   let outputTokens = null;
 
-  httpStream(request.url, request.headers, request.body, {
+  const req = httpStream(request.url, request.headers, request.body, {
     onEvent: (_evtType, data) => {
       // Some endpoints send a final chunk with only usage info and no choices
       if (!data.choices?.length) {
@@ -352,14 +413,15 @@ function streamOpenAI(request, onChunk, resolve, reject, mode) {
       reject(err);
     },
   });
+  if (onRequest) onRequest(req);
 }
 
-function streamAnthropic(request, onChunk, resolve, reject) {
+function streamAnthropic(request, onChunk, resolve, reject, onRequest) {
   const blocks = new Map();     // index → { type, content, id, name }
   let inputTokens  = null;
   let outputTokens = null;
 
-  httpStream(request.url, request.headers, request.body, {
+  const req = httpStream(request.url, request.headers, request.body, {
     onEvent: (eventType, data) => {
       switch (eventType) {
         case 'message_start':
@@ -454,6 +516,7 @@ function streamAnthropic(request, onChunk, resolve, reject) {
       reject(err);
     },
   });
+  if (onRequest) onRequest(req);
 }
 
 // LM Studio v1 streaming — documented event format:
@@ -465,10 +528,10 @@ function streamAnthropic(request, onChunk, resolve, reject) {
 // All other events (chat.start, model_load.*, prompt_processing.*, *.start, *.end,
 // tool_call.arguments/success/failure) are silently ignored.
 
-function streamLMStudioV1(request, onChunk, resolve, reject) {
+function streamLMStudioV1(request, onChunk, resolve, reject, onRequest) {
   let resolved = false;
 
-  httpStream(request.url, request.headers, request.body, {
+  const req = httpStream(request.url, request.headers, request.body, {
     onEvent: (_eventType, data) => {
       // data.type is the canonical event identifier (mirrors SSE event: field)
       switch (data.type) {
@@ -538,6 +601,7 @@ function streamLMStudioV1(request, onChunk, resolve, reject) {
       reject(err);
     },
   });
+  if (onRequest) onRequest(req);
 }
 
 // ─── Response parsers ─────────────────────────────────────────────────────────
@@ -780,10 +844,12 @@ async function complete({ endpoint, model, systemPrompt, apiKey, messages, previ
   console.log(`\n[llm] ▶ mode=${mode}  model=${model}  endpoint=${request.url}`);
   console.log('[llm] REQUEST:', JSON.stringify(request.body, null, 2));
 
-  const data = await fetchJson(request.url, request.headers, request.body);
+  let data = await fetchJson(request.url, request.headers, request.body);
 
   console.log('[llm] RESPONSE:', JSON.stringify(data, null, 2));
   // ─────────────────────────────────────────────────────────────────────────────
+
+  data = sanitizeResponse(data, mode);
 
   if (mode === 'anthropic')   return parseAnthropicResponse(data);
   if (mode === 'lmstudio-v1') return parseLMStudioV1Response(data);
@@ -816,15 +882,26 @@ async function stream({ endpoint, model, systemPrompt, apiKey, messages, previou
   console.log(`\n[llm:stream] ▶ mode=${mode}  model=${model}  endpoint=${request.url}`);
   console.log('[llm:stream] REQUEST:', JSON.stringify(request.body, null, 2));
 
-  return new Promise((resolve, reject) => {
+  // The returned Promise has an extra .abort(reason) method that immediately
+  // destroys the TCP socket so the ✕ STOP button feels instant.
+  let _req = null;
+  const promise = new Promise((resolve, reject) => {
+    const onRequest = (r) => { _req = r; };
     if (mode === 'anthropic') {
-      streamAnthropic(request, onChunk, resolve, reject);
+      streamAnthropic(request, onChunk, resolve, reject, onRequest);
     } else if (mode === 'lmstudio-v1') {
-      streamLMStudioV1(request, onChunk, resolve, reject);
+      streamLMStudioV1(request, onChunk, resolve, reject, onRequest);
     } else {
-      streamOpenAI(request, onChunk, resolve, reject, mode);
+      streamOpenAI(request, onChunk, resolve, reject, mode, onRequest);
     }
   });
+
+  promise.abort = (reason = 'aborted') => {
+    if (_req && !_req.destroyed) _req.destroy(new Error(reason));
+  };
+  promise.getMode = () => mode;
+
+  return promise;
 }
 
 // ─── fetchModels ──────────────────────────────────────────────────────────────

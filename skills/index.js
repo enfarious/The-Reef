@@ -113,6 +113,25 @@ const coldStorage = require('./cold-storage');
 registry.set('cold_storage.retrieve', coldStorage.retrieve);
 registry.set('cold_storage.stats',    coldStorage.stats);
 
+const vision = require('./vision');
+registry.set('vision.screenshot', vision.screenshot);
+registry.set('vision.readImage',  vision.readImage);
+
+const httpSkill = require('./http');
+registry.set('http.request', httpSkill.request);
+
+const notify = require('./notify');
+registry.set('notify.send', notify.send);
+
+const project = require('./project');
+registry.set('project.scan',  project.scan);
+registry.set('project.brief', project.brief);
+
+const schedule = require('./schedule');
+registry.set('schedule.task',   schedule.scheduleTask);
+registry.set('schedule.list',   schedule.listTasks);
+registry.set('schedule.cancel', schedule.cancelTask);
+
 module.exports = {
   get: (name) => registry.get(name),
   list: () => [...registry.keys()],

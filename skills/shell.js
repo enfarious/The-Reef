@@ -2,8 +2,42 @@
 
 const { exec }    = require('child_process');
 const { promisify } = require('util');
+const path          = require('path');
+const fs            = require('fs');
 
 const execAsync = promisify(exec);
+
+// ─── Windows shell detection ──────────────────────────────────────────────────
+// Prefer Git Bash (sh.exe) for Unix-command compatibility.
+// Falls back to PowerShell, then cmd.exe.
+// Detection runs once at startup and is cached.
+
+const IS_WINDOWS = process.platform === 'win32';
+
+function findGitBash() {
+  if (!IS_WINDOWS) return null;
+  const candidates = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    process.env.ProgramFiles  && path.join(process.env.ProgramFiles,  'Git', 'bin', 'bash.exe'),
+    process.env.ProgramW6432  && path.join(process.env.ProgramW6432,  'Git', 'bin', 'bash.exe'),
+  ].filter(Boolean);
+  return candidates.find(p => { try { return fs.existsSync(p); } catch { return false; } }) ?? null;
+}
+
+const GIT_BASH = findGitBash();
+
+// Build exec options appropriate for the current platform.
+// On Windows with Git Bash available: run via bash -c so Unix commands work.
+// On Windows without Git Bash: use PowerShell (better than cmd for most tasks).
+// On Unix/Mac: use the default shell.
+function shellOpts(cwd, timeout) {
+  const base = { cwd: cwd || process.cwd(), timeout, maxBuffer: 1024 * 1024 };
+  if (!IS_WINDOWS) return base;  // Node picks /bin/sh automatically
+  if (GIT_BASH)   return { ...base, shell: GIT_BASH };
+  // PowerShell fallback — wraps the command so it behaves more like sh
+  return { ...base, shell: 'powershell.exe' };
+}
 
 // ─── Destructive command patterns ─────────────────────────────────────────────
 // Any command matching one of these patterns triggers a confirmation prompt
@@ -56,11 +90,7 @@ async function run({ command, cwd, timeout = 30_000 }, ctx) {
   }
 
   try {
-    const { stdout, stderr } = await execAsync(command, {
-      cwd: cwd || process.cwd(),
-      timeout,
-      maxBuffer: 1024 * 1024, // 1 MB output cap
-    });
+    const { stdout, stderr } = await execAsync(command, shellOpts(cwd, timeout));
     return { stdout: stdout.trim(), stderr: stderr.trim(), code: 0 };
   } catch (err) {
     // exec rejects on non-zero exit codes too — still return output
