@@ -43,6 +43,7 @@ export function applyConfig(cfg) {
   if (!cfg) return;
   if (cfg.database) state.config.database = cfg.database;
   if (cfg.global) {
+    state.config.global = { ...state.config.global, ...cfg.global };
     if (cfg.global.cycle) document.getElementById('cycleNumber').value = cfg.global.cycle.replace(/^CYCLE_/i, '');
     if (cfg.global.apiKey) document.getElementById('globalApiKey').value = cfg.global.apiKey;
   }

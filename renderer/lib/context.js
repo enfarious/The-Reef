@@ -104,7 +104,8 @@ export function buildOperatorSection() {
 }
 
 export function buildSessionSection() {
-  const cycle = state.config.global?.cycle || 'CYCLE_001';
+  const cycleNum = document.getElementById('cycleNumber')?.value.trim() || '001';
+  const cycle = 'CYCLE_' + cycleNum;
   const today = new Date().toISOString().slice(0, 10);
   return `[SESSION]\nCycle: ${cycle}\nDate: ${today}`;
 }
