@@ -82,13 +82,19 @@ function parseAnthropicResponse(data) {
     outputTokens: data.usage?.output_tokens ?? null,
   };
 
+  // Collect ALL text blocks — models can interleave text with tool_use
+  const allText = content
+    .filter(b => b.type === 'text')
+    .map(b => b.text)
+    .filter(t => t && t.trim());
+  const joinedText = allText.join('\n\n') || null;
+
   if (data.stop_reason === 'tool_use') {
     const toolUse = content
       .filter(b => b.type === 'tool_use')
       .map(b => ({ id: b.id, name: b.name, input: b.input }));
-    const textBlock = content.find(b => b.type === 'text');
     return {
-      text:       textBlock?.text ?? null,
+      text:       joinedText,
       toolUse,
       rawContent: content,   // full content array — pushed as assistant message content
       mode:       'anthropic',
@@ -99,7 +105,7 @@ function parseAnthropicResponse(data) {
   }
 
   return {
-    text:       content.find(b => b.type === 'text')?.text ?? '[no response]',
+    text:       joinedText ?? '[no response]',
     toolUse:    null,
     rawContent: content,
     mode:       'anthropic',

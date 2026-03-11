@@ -199,7 +199,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
         }
       }
 
-      if (text) {
+      if (text?.trim()) {
         const msgId = uid();
         let aDiv;
         if (result._bubble) {
@@ -224,8 +224,8 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
 
     // ── Tool calls present — push assistant turn, execute, loop ─────────────
     if (result._bubble) {
-      adoptBubbleAsAccumulator(id, result._bubble, text || null);
-    } else if (text) {
+      adoptBubbleAsAccumulator(id, result._bubble);
+    } else if (text?.trim()) {
       appendToolTextMsg(id, text);
     }
 
@@ -433,8 +433,8 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
   else          msgs.appendChild(bubble);
   msgs.scrollTop = msgs.scrollHeight;
 
-  const streamTextEl     = bubble.querySelector('.stream-text');
-  const streamTextWrap   = bubble.querySelector('.stream-text-wrap');
+  let   streamTextEl     = bubble.querySelector('.stream-text');
+  let   streamTextWrap   = bubble.querySelector('.stream-text-wrap');
   const streamReasonEl   = bubble.querySelector('.stream-reasoning-body');
   const streamReasonWrap = bubble.querySelector('.stream-reasoning-wrap');
   const streamToolStrip  = bubble.querySelector('.stream-tool-strip');
@@ -469,9 +469,16 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
         }
         break;
       case 'tool_done':
-        // Hide the "in progress" strip
         if (streamToolStrip) streamToolStrip.style.display = 'none';
         if (chunk.name) {
+          // Seal current text segment if it has content — move it above the tool strip
+          if (streamTextWrap && accText.trim()) {
+            streamTextWrap.classList.add('sealed');
+            streamTextWrap.querySelector('.stream-cursor')?.remove();
+            if (streamToolStrip) bubble.insertBefore(streamTextWrap, streamToolStrip);
+          }
+
+          // Create tool-call-block, insert before tool strip (after sealed text)
           const tcuid = `tc-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const display = chunk.name.replace(/_/g, '.');
           const args = JSON.stringify(chunk.input ?? {}, null, 2);
@@ -483,12 +490,22 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
               <span class="reasoning-arrow">▸</span> ⟐ ${escHtml(display)}
             </button>
             <div class="reasoning-body">${escHtml(args)}</div>`;
-          // Insert before the streaming elements (tools appear at top)
-          const firstStreamEl = bubble.querySelector('.stream-reasoning-wrap')
-            || bubble.querySelector('.stream-tool-strip')
-            || bubble.querySelector('.stream-text-wrap');
-          if (firstStreamEl) bubble.insertBefore(block, firstStreamEl);
-          else                bubble.appendChild(block);
+          if (streamToolStrip) bubble.insertBefore(block, streamToolStrip);
+          else                 bubble.appendChild(block);
+
+          // Create fresh text wrap for the next text segment
+          if (accText.trim()) {
+            const newWrap = document.createElement('div');
+            newWrap.className = 'stream-text-wrap';
+            newWrap.style.display = 'none';
+            newWrap.innerHTML = '<span class="stream-text"></span><span class="stream-cursor">▌</span>';
+            if (streamToolStrip) bubble.insertBefore(newWrap, streamToolStrip);
+            else                 bubble.appendChild(newWrap);
+            streamTextWrap = newWrap;
+            streamTextEl   = newWrap.querySelector('.stream-text');
+            accText = '';
+          }
+
           if (!bubble._streamedToolIds) bubble._streamedToolIds = new Set();
           bubble._streamedToolIds.add(chunk.id ?? chunk.name);
           msgs.scrollTop = msgs.scrollHeight;

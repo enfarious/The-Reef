@@ -3,7 +3,7 @@
 import { PERSONAS, state } from './state.js';
 import { SKILL_MAP } from './tools.js';
 import { appendTransmissionMsg, appendAssistantMsg, setThinking } from './messages-ui.js';
-import { thinkingTimers, abortPersona } from './abort.js';
+import { thinkingTimers } from './abort.js';
 import { scheduleTask, cancelTask, listTasks } from './scheduler.js';
 
 const COLONY_ASK_TIMEOUT_MS = 90_000;  // 90s — must be shorter than maxThinkingTime
@@ -146,6 +146,14 @@ function restoreCallerTimer(id) {
   if (maxSecs <= 0) return;
   if (thinkingTimers[id]) clearTimeout(thinkingTimers[id]);
   thinkingTimers[id] = setTimeout(() => {
-    if (state.thinking[id]) abortPersona(id, '⏱ TIMED OUT');
+    if (state.thinking[id]) {
+      const ind = document.getElementById(`thinking-${id}`);
+      if (ind) {
+        const label = document.createElement('div');
+        label.className = 'timeout-label';
+        label.textContent = '⏱ generation running longer than expected…';
+        ind.appendChild(label);
+      }
+    }
   }, maxSecs * 1000);
 }

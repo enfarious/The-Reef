@@ -221,7 +221,7 @@ function streamAnthropic(request, onChunk, resolve, reject, onRequest) {
         }
       }
 
-      const text      = textParts.join('')  || null;
+      const text      = textParts.filter(t => t.trim()).join('\n\n') || null;
       const reasoning = thinkParts.join('') || null;
 
       onChunk({ type: 'done' });
