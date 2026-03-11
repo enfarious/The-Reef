@@ -26,33 +26,42 @@ function getOrCreateToolAccumulator(id) {
   return toolAccumulators[id];
 }
 
-export function adoptBubbleAsAccumulator(id, bubble, pretextContent = null) {
+export function adoptBubbleAsAccumulator(id, bubble) {
+  // Convert streaming elements to static equivalents, preserving DOM order
+  convertStreamingElements(bubble, 'tool-pretext');
+
   if (toolAccumulators[id]) {
-    // Accumulator already exists from a prior iteration — move streamed tool blocks, discard bubble
-    for (const block of bubble.querySelectorAll('.tool-call-block')) {
-      toolAccumulators[id].appendChild(block);
-    }
+    // Accumulator already exists — move all converted content into it
+    while (bubble.firstChild) toolAccumulators[id].appendChild(bubble.firstChild);
     bubble.remove();
-    if (pretextContent) {
-      const el = document.createElement('div');
-      el.className = 'msg-bubble tool-pretext';
-      el.innerHTML = formatMd(escHtml(pretextContent));
-      toolAccumulators[id].appendChild(el);
-    }
+    const msgs = document.getElementById(`msgs-${id}`);
+    msgs.scrollTop = msgs.scrollHeight;
     return;
   }
-  // First time — convert bubble to accumulator, preserving any tool-call-blocks from streaming
-  const toolBlocks = [...bubble.querySelectorAll('.tool-call-block')];
+
+  // First time — convert bubble to accumulator in place
   bubble.className = 'message assistant-msg tool-accumulator';
-  bubble.innerHTML = '';
-  for (const block of toolBlocks) bubble.appendChild(block);
-  if (pretextContent) {
-    const el = document.createElement('div');
-    el.className = 'msg-bubble tool-pretext';
-    el.innerHTML = formatMd(escHtml(pretextContent));
-    bubble.appendChild(el);
-  }
   toolAccumulators[id] = bubble;
+}
+
+// Convert streaming DOM elements to their static equivalents
+function convertStreamingElements(container, textClass = '') {
+  container.querySelector('.stream-tool-strip')?.remove();
+  container.querySelector('.stream-reasoning-wrap')?.remove();
+  container.querySelectorAll('.stream-cursor').forEach(c => c.remove());
+
+  for (const wrap of [...container.querySelectorAll('.stream-text-wrap')]) {
+    const textEl = wrap.querySelector('.stream-text');
+    const segText = textEl?.textContent?.trim();
+    if (segText) {
+      const el = document.createElement('div');
+      el.className = textClass ? `msg-bubble ${textClass}` : 'msg-bubble';
+      el.innerHTML = formatMd(escHtml(segText));
+      wrap.replaceWith(el);
+    } else {
+      wrap.remove();
+    }
+  }
 }
 
 export function clearToolAccumulator(id) {
@@ -234,7 +243,16 @@ export function setThinking(id, thinking) {
     const maxSecs = state.config.settings?.maxThinkingTime ?? 120;
     if (maxSecs > 0) {
       thinkingTimers[id] = setTimeout(() => {
-        if (state.thinking[id]) _abortPersona(id, '⏱ TIMED OUT');
+        if (state.thinking[id]) {
+          const ind = document.getElementById(`thinking-${id}`);
+          if (ind) {
+            const label = document.createElement('div');
+            label.className = 'timeout-label';
+            label.textContent = '⏱ generation running longer than expected…';
+            ind.appendChild(label);
+            msgs.scrollTop = msgs.scrollHeight;
+          }
+        }
       }, maxSecs * 1000);
     }
 
@@ -259,32 +277,54 @@ export function setThinking(id, thinking) {
 }
 
 export function finalizeStreamingBubble(id, bubble, text, reasoning, stats) {
-  // Consume any accumulated tool content
+  // Consume any accumulated tool content from prior iterations
   const acc = toolAccumulators[id];
   delete toolAccumulators[id];
 
-  // Collect tool-call-blocks: first from the streaming bubble itself, then from the accumulator
-  let toolContentHtml = '';
-  for (const block of bubble.querySelectorAll('.tool-call-block')) {
-    toolContentHtml += block.outerHTML;
+  // --- Remove streaming chrome ---
+  bubble.querySelector('.stream-tool-strip')?.remove();
+  bubble.querySelectorAll('.stream-cursor').forEach(c => c.remove());
+
+  // --- Convert reasoning wrap to proper reasoning block ---
+  const rWrap = bubble.querySelector('.stream-reasoning-wrap');
+  if (rWrap && reasoning) {
+    const ruid = `r-${Date.now()}`;
+    const rBlock = document.createElement('div');
+    rBlock.className = 'reasoning-block open';
+    rBlock.id = ruid;
+    rBlock.innerHTML = `
+      <button class="reasoning-toggle" data-block-toggle="${ruid}">
+        <span class="reasoning-arrow">▸</span> REASONING
+      </button>
+      <div class="reasoning-body">${escHtml(String(reasoning))}</div>`;
+    rWrap.replaceWith(rBlock);
+  } else if (rWrap) {
+    rWrap.remove();
   }
+
+  // --- Convert text wraps to msg-bubbles (preserves interleaved order) ---
+  for (const wrap of [...bubble.querySelectorAll('.stream-text-wrap')]) {
+    const textEl = wrap.querySelector('.stream-text');
+    const segText = textEl?.textContent?.trim();
+    if (segText) {
+      const msgBubble = document.createElement('div');
+      msgBubble.className = 'msg-bubble';
+      msgBubble.innerHTML = formatMd(escHtml(segText));
+      wrap.replaceWith(msgBubble);
+    } else {
+      wrap.remove();
+    }
+  }
+
+  // --- Prepend accumulated tool content from prior iterations ---
   if (acc) {
-    toolContentHtml += acc.innerHTML;
+    const fragment = document.createDocumentFragment();
+    while (acc.firstChild) fragment.appendChild(acc.firstChild);
+    bubble.insertBefore(fragment, bubble.firstChild);
     acc.remove();
   }
 
-  let reasoningHtml = '';
-  if (reasoning) {
-    const ruid = `r-${Date.now()}`;
-    reasoningHtml = `
-      <div class="reasoning-block open" id="${ruid}">
-        <button class="reasoning-toggle" data-block-toggle="${ruid}">
-          <span class="reasoning-arrow">▸</span> REASONING
-        </button>
-        <div class="reasoning-body">${escHtml(String(reasoning))}</div>
-      </div>`;
-  }
-
+  // --- Append meta row ---
   let metaExtra = '';
   if (stats) {
     const tps  = stats.tokens_per_second           != null ? `${stats.tokens_per_second.toFixed(1)} tok/s` : null;
@@ -293,18 +333,16 @@ export function finalizeStreamingBubble(id, bubble, text, reasoning, stats) {
     if (parts.length) metaExtra = ` · ${parts.join(' · ')}`;
   }
 
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta-row';
+  meta.innerHTML = `
+    <span class="msg-meta">${timestamp()}${escHtml(metaExtra)}</span>
+    <span class="msg-actions">
+      <button class="msg-edit-btn" title="Edit">✎</button>
+      <button class="msg-delete-btn" title="Remove from context">×</button>
+    </span>`;
+  bubble.appendChild(meta);
+
   bubble.className = 'message assistant-msg';
-  bubble.innerHTML = `
-    ${toolContentHtml}
-    ${reasoningHtml}
-    <div class="msg-bubble">${formatMd(escHtml(text))}</div>
-    <div class="msg-meta-row">
-      <span class="msg-meta">${timestamp()}${escHtml(metaExtra)}</span>
-      <span class="msg-actions">
-        <button class="msg-edit-btn" title="Edit">✎</button>
-        <button class="msg-delete-btn" title="Remove from context">×</button>
-      </span>
-    </div>
-  `;
   return bubble;
 }
