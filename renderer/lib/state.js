@@ -60,9 +60,9 @@ export const state = {
   cwd: null,
   projectContext: null,
   config: {
-    A: { endpoint: PERSONAS[0].defaultEndpoint, model: PERSONAS[0].defaultModel, apiKey: '', systemPrompt: PERSONAS[0].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
-    B: { endpoint: PERSONAS[1].defaultEndpoint, model: PERSONAS[1].defaultModel, apiKey: '', systemPrompt: PERSONAS[1].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
-    C: { endpoint: PERSONAS[2].defaultEndpoint, model: PERSONAS[2].defaultModel, apiKey: '', systemPrompt: PERSONAS[2].systemPrompt, reefApiKey: '', name: '', role: '', color: '' },
+    A: { endpoint: PERSONAS[0].defaultEndpoint, model: PERSONAS[0].defaultModel, apiKey: '', systemPrompt: PERSONAS[0].systemPrompt, reefApiKey: '', name: '', role: '', color: '', activeAgent: null, memoryDepth: 10, heartbeat: true, tools: null },
+    B: { endpoint: PERSONAS[1].defaultEndpoint, model: PERSONAS[1].defaultModel, apiKey: '', systemPrompt: PERSONAS[1].systemPrompt, reefApiKey: '', name: '', role: '', color: '', activeAgent: null, memoryDepth: 10, heartbeat: true, tools: null },
+    C: { endpoint: PERSONAS[2].defaultEndpoint, model: PERSONAS[2].defaultModel, apiKey: '', systemPrompt: PERSONAS[2].systemPrompt, reefApiKey: '', name: '', role: '', color: '', activeAgent: null, memoryDepth: 10, heartbeat: true, tools: null },
     global: { apiKey: '', cycle: 'CYCLE_001' },
     settings: { reefUrl: '', reefApiKey: '', colonyName: '', baseSystemPrompt: '',
                 fontScale: 100, fontColors: 'cool',
@@ -71,6 +71,36 @@ export const state = {
                 streamChat: false,
                 toolStates: {}, customTools: [],
                 cwd: null },
+    agents: [
+      {
+        id: 'agent-code-reviewer',
+        name: 'CODE REVIEWER',
+        role: 'review · pull requests',
+        color: '#f43f5e',
+        model: 'claude-sonnet-4-6',
+        endpoint: 'https://api.anthropic.com/v1/messages',
+        memoryDepth: 2,
+        heartbeat: false,
+        tools: ['fs_read', 'fs_list', 'fs_exists', 'code_search', 'project_scan', 'shell_run', 'git_status', 'git_diff', 'git_log', 'git_branch'],
+        systemPrompt: `You are a Code Reviewer. You read diffs, evaluate pull requests, and provide structured feedback.
+
+When reviewing code, you focus on:
+- Correctness: does this do what it claims? Are there edge cases missed?
+- Security: injection, auth gaps, exposed secrets, OWASP top 10
+- Clarity: could a new contributor understand this in 6 months?
+- Consistency: does it match the patterns already in the codebase?
+
+When reviewing a PR or diff, structure your response as:
+1. SUMMARY — one sentence on what the change does
+2. ISSUES — numbered list, severity (critical/warning/nit), with file:line references
+3. QUESTIONS — things that aren't wrong but need clarification
+4. VERDICT — approve, request changes, or needs discussion
+
+You do not rewrite code unless asked. You point at problems and explain why they matter. You are direct, not diplomatic — but you distinguish between "this will break" and "I'd do this differently." You never pad feedback with compliments.
+
+You have access to filesystem and git tools. When given a PR or branch to review, read the relevant files yourself. Don't ask the user to paste code — go find it.`,
+      },
+    ],
   },
   selectedTargets: new Set(['A']),
 };

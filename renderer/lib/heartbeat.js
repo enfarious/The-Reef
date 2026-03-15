@@ -1,8 +1,8 @@
 // ─── Heartbeat system ─────────────────────────────────────────────────────────
 //
-// Per-entity staggered heartbeat timers with cooldown guard.
-// Uses self-rescheduling setTimeout so the next heartbeat fires only AFTER the
-// current one completes — prevents accumulation and runaway cycling.
+// Sequential single-track rotation: A → B → C → A → ...
+// Only one persona runs at a time. The next heartbeat schedules only AFTER the
+// current one completes — prevents GPU contention on local inference.
 
 import { PERSONAS, state } from './state.js';
 import { maybeAutoCompact } from './context.js';
@@ -14,8 +14,7 @@ export function setHeartbeatCallbacks({ sendToPersona }) {
   _sendToPersona = sendToPersona;
 }
 
-let heartbeatTimer  = null;
-let heartbeatTimers = { A: null, B: null, C: null };
+let heartbeatTimeout = null;
 
 const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000;  // 10 minutes
 
@@ -57,6 +56,7 @@ The shelves are the work.`;
 export async function runHeartbeatFor(personaId) {
   if (state.thinking[personaId]) return;
   if (!personaHasApiAccess(personaId)) return;
+  if (state.config[personaId].heartbeat === false) return;
 
   const last = state.lastActivity[personaId];
   if (last && (Date.now() - last) < HEARTBEAT_COOLDOWN_MS) return;
@@ -99,24 +99,34 @@ export async function runHeartbeatFor(personaId) {
 }
 
 export function startHeartbeat() {
-  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-  Object.keys(heartbeatTimers).forEach(id => {
-    if (heartbeatTimers[id]) { clearTimeout(heartbeatTimers[id]); heartbeatTimers[id] = null; }
-  });
+  if (heartbeatTimeout) { clearTimeout(heartbeatTimeout); heartbeatTimeout = null; }
 
-  const mins       = Math.max(5, state.config.settings.heartbeatInterval || 60);
-  const intervalMs = mins * 60 * 1000;
+  // Single sequential rotation: A → B → C → A → ...
+  // Each persona runs to completion before the next one starts.
+  // Delay between beats = interval / (colony_size + 1), so there's
+  // an even gap after C wraps back to A.
+  const order = PERSONAS.map(p => p.id);
+  let idx = 0;
 
-  function scheduleFor(id, delayMs) {
-    heartbeatTimers[id] = setTimeout(async () => {
-      heartbeatTimers[id] = null;
+  function scheduleNext() {
+    const mins       = Math.max(5, state.config.settings.heartbeatInterval || 60);
+    const slotMs     = (mins * 60 * 1000) / (order.length + 1);
+
+    heartbeatTimeout = setTimeout(async () => {
+      heartbeatTimeout = null;
+      const id = order[idx];
+      idx = (idx + 1) % order.length;
       await runHeartbeatFor(id);
-      scheduleFor(id, intervalMs);
-    }, delayMs);
+      scheduleNext();
+    }, slotMs);
   }
 
-  PERSONAS.forEach(p => {
-    const jitter = Math.floor(Math.random() * intervalMs);
-    scheduleFor(p.id, jitter);
-  });
+  // First beat after a short initial delay (30s settle time)
+  heartbeatTimeout = setTimeout(async () => {
+    heartbeatTimeout = null;
+    const id = order[idx];
+    idx = (idx + 1) % order.length;
+    await runHeartbeatFor(id);
+    scheduleNext();
+  }, 30_000);
 }

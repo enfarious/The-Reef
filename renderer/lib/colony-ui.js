@@ -19,6 +19,7 @@ export function buildColony() {
             <div class="persona-role" id="role-${p.id}">${p.role}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
+            <button class="reef-post-btn agent-picker-btn" data-agent-picker="${p.id}" title="Switch agent">▾</button>
             <button class="reef-post-btn entity-settings-btn" data-entity-settings="${p.id}" title="Entity settings">⚙</button>
             <button class="reef-post-btn" data-persona-wake="${p.id}">⟳ WAKE</button>
             <button class="reef-post-btn" data-persona-pulse="${p.id}" title="Trigger heartbeat check-in">♥ BEAT</button>
