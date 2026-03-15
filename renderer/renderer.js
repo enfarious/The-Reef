@@ -30,6 +30,7 @@ import { setSchedulerCallbacks }                               from './lib/sched
 import {
   openEntitySettings, openReefPost,
   initConfirmModal, initEntitySettingsListeners,
+  openAgentPicker, initAgentPickerListeners,
 } from './lib/modals.js';
 
 // ─── Per-persona message queue ───────────────────────────────────────────────
@@ -419,10 +420,6 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
   const bubble = document.createElement('div');
   bubble.className = 'message assistant-msg streaming-bubble';
   bubble.innerHTML = `
-    <div class="stream-reasoning-wrap" style="display:none">
-      <div class="stream-reasoning-hdr">▸ REASONING</div>
-      <div class="stream-reasoning-body"></div>
-    </div>
     <div class="stream-tool-strip" style="display:none"></div>
     <div class="stream-text-wrap" style="display:none">
       <span class="stream-text"></span><span class="stream-cursor">▌</span>
@@ -433,22 +430,43 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
   else          msgs.appendChild(bubble);
   msgs.scrollTop = msgs.scrollHeight;
 
-  let   streamTextEl     = bubble.querySelector('.stream-text');
-  let   streamTextWrap   = bubble.querySelector('.stream-text-wrap');
-  const streamReasonEl   = bubble.querySelector('.stream-reasoning-body');
-  const streamReasonWrap = bubble.querySelector('.stream-reasoning-wrap');
+  let streamTextEl     = bubble.querySelector('.stream-text');
+  let streamTextWrap   = bubble.querySelector('.stream-text-wrap');
+  let streamReasonEl   = null;
+  let streamReasonWrap = null;
   const streamToolStrip  = bubble.querySelector('.stream-tool-strip');
   let accText      = '';
   let accReasoning = '';
+  let lastChunkType = 'text';  // 'text' | 'reasoning' | 'tool'
 
   const removeListener = window.reef.onStreamEvent((evtId, chunk) => {
     if (evtId !== streamId) return;
     switch (chunk.type) {
       case 'text':
+        // Transition from reasoning → text: seal reasoning, ensure fresh text wrap
+        if (lastChunkType === 'reasoning' && streamReasonWrap) {
+          streamReasonWrap.classList.add('sealed');
+          if (streamToolStrip) bubble.insertBefore(streamReasonWrap, streamToolStrip);
+          streamReasonWrap = null;
+          streamReasonEl   = null;
+          accReasoning = '';
+        }
+        // If current text wrap was sealed (by a prior tool_done), create a fresh one
+        if (!streamTextWrap || streamTextWrap.classList.contains('sealed')) {
+          const newWrap = document.createElement('div');
+          newWrap.className = 'stream-text-wrap';
+          newWrap.style.display = 'none';
+          newWrap.innerHTML = '<span class="stream-text"></span><span class="stream-cursor">▌</span>';
+          if (streamToolStrip) bubble.insertBefore(newWrap, streamToolStrip);
+          else                 bubble.appendChild(newWrap);
+          streamTextWrap = newWrap;
+          streamTextEl   = newWrap.querySelector('.stream-text');
+          accText = '';
+        }
+        lastChunkType = 'text';
         accText += chunk.delta;
         if (streamTextEl) {
           streamTextEl.textContent = accText;
-          // Show text wrap only once non-whitespace content arrives
           if (streamTextWrap.style.display === 'none' && accText.trim()) {
             streamTextWrap.style.display = '';
           }
@@ -456,11 +474,32 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
         }
         break;
       case 'reasoning':
+        // Transition from text/tool → reasoning: seal text, create new reasoning wrap
+        if (lastChunkType !== 'reasoning') {
+          if (streamTextWrap && accText.trim()) {
+            streamTextWrap.classList.add('sealed');
+            streamTextWrap.querySelector('.stream-cursor')?.remove();
+            if (streamToolStrip) bubble.insertBefore(streamTextWrap, streamToolStrip);
+          }
+          const rWrap = document.createElement('div');
+          rWrap.className = 'stream-reasoning-wrap';
+          rWrap.style.display = 'none';
+          rWrap.innerHTML = `
+            <div class="stream-reasoning-hdr">▸ REASONING</div>
+            <div class="stream-reasoning-body"></div>`;
+          if (streamToolStrip) bubble.insertBefore(rWrap, streamToolStrip);
+          else                 bubble.appendChild(rWrap);
+          streamReasonWrap = rWrap;
+          streamReasonEl   = rWrap.querySelector('.stream-reasoning-body');
+          accReasoning = '';
+        }
+        lastChunkType = 'reasoning';
         accReasoning += chunk.delta;
         if (streamReasonWrap.style.display === 'none') {
           streamReasonWrap.style.display = '';
         }
         if (streamReasonEl) streamReasonEl.textContent = accReasoning;
+        msgs.scrollTop = msgs.scrollHeight;
         break;
       case 'tool_start':
         if (streamToolStrip && chunk.name) {
@@ -471,14 +510,22 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
       case 'tool_done':
         if (streamToolStrip) streamToolStrip.style.display = 'none';
         if (chunk.name) {
-          // Seal current text segment if it has content — move it above the tool strip
+          // Seal current reasoning segment if active
+          if (lastChunkType === 'reasoning' && streamReasonWrap) {
+            streamReasonWrap.classList.add('sealed');
+            if (streamToolStrip) bubble.insertBefore(streamReasonWrap, streamToolStrip);
+            streamReasonWrap = null;
+            streamReasonEl   = null;
+            accReasoning = '';
+          }
+          // Seal current text segment if it has content
           if (streamTextWrap && accText.trim()) {
             streamTextWrap.classList.add('sealed');
             streamTextWrap.querySelector('.stream-cursor')?.remove();
             if (streamToolStrip) bubble.insertBefore(streamTextWrap, streamToolStrip);
           }
 
-          // Create tool-call-block, insert before tool strip (after sealed text)
+          // Create tool-call-block, insert before tool strip
           const tcuid = `tc-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const display = chunk.name.replace(/_/g, '.');
           const args = JSON.stringify(chunk.input ?? {}, null, 2);
@@ -493,7 +540,7 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
           if (streamToolStrip) bubble.insertBefore(block, streamToolStrip);
           else                 bubble.appendChild(block);
 
-          // Create fresh text wrap for the next text segment
+          // Create fresh text wrap for the next segment
           if (accText.trim()) {
             const newWrap = document.createElement('div');
             newWrap.className = 'stream-text-wrap';
@@ -508,6 +555,7 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
 
           if (!bubble._streamedToolIds) bubble._streamedToolIds = new Set();
           bubble._streamedToolIds.add(chunk.id ?? chunk.name);
+          lastChunkType = 'tool';
           msgs.scrollTop = msgs.scrollHeight;
         }
         break;
@@ -640,9 +688,25 @@ async function wakePersona(id) {
 
   const memBudget = Math.floor(getContextWindow() * 0.30);
 
+  const memoryDepth = state.config[id].memoryDepth != null ? state.config[id].memoryDepth : 10;
+
+  if (memoryDepth === 0) {
+    const indicator = document.getElementById(`waking-${id}`);
+    if (indicator) indicator.remove();
+    const wBtn = document.querySelector(`[data-persona-wake="${id}"]`);
+    if (wBtn) { wBtn.classList.add('wake-lit'); wBtn.textContent = '✓ AWAKE'; }
+    const div = document.createElement('div');
+    div.className = 'message assistant-msg';
+    div.innerHTML = `<div class="skill-indicator">◈ memory depth 0 — ${escHtml(personaName)} wakes without memories</div>`;
+    msgs.appendChild(div);
+    appendOperatorBadge(id, msgs);
+    msgs.scrollTop = msgs.scrollHeight;
+    return;
+  }
+
   const result = await window.reef.invoke('memory.wakeup', {
     persona:     personaName.toLowerCase(),
-    limit:       10,
+    limit:       memoryDepth,
     tokenBudget: memBudget,
   });
 
@@ -765,6 +829,10 @@ document.addEventListener('click', e => {
     return;
   }
 
+  if (e.target.matches('[data-agent-picker]')) {
+    openAgentPicker(e.target.dataset.agentPicker, e.target);
+  }
+
   if (e.target.matches('[data-entity-settings]')) {
     entitySettingsPersonaId = e.target.dataset.entitySettings;
     openEntitySettings(e.target.dataset.entitySettings, e.target);
@@ -881,6 +949,7 @@ async function init() {
   initConfigListeners();
   initConfirmModal();
   initEntitySettingsListeners();
+  initAgentPickerListeners();
 
   // Start heartbeat
   startHeartbeat();

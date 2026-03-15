@@ -23,11 +23,16 @@ export function collectConfig() {
       name:  state.config[p.id].name  || '',
       role:  state.config[p.id].role  || '',
       color: state.config[p.id].color || '',
+      activeAgent: state.config[p.id].activeAgent || null,
+      memoryDepth: state.config[p.id].memoryDepth != null ? state.config[p.id].memoryDepth : 10,
+      heartbeat: state.config[p.id].heartbeat !== false,
+      tools: state.config[p.id].tools || null,
     };
   });
   cfg.global.apiKey = document.getElementById('globalApiKey').value;
   cfg.settings = { ...state.config.settings, cwd: state.cwd || null };
   if (state.config.database) cfg.database = state.config.database;
+  if (state.config.agents && state.config.agents.length) cfg.agents = state.config.agents;
   return cfg;
 }
 
@@ -58,6 +63,7 @@ export function applyConfig(cfg) {
       scanProject(cfg.settings.cwd);
     }
   }
+  if (cfg.agents) state.config.agents = cfg.agents;
   PERSONAS.forEach(p => {
     const pc = cfg[p.id];
     if (!pc) return;
@@ -96,6 +102,10 @@ export function applyConfig(cfg) {
       state.config[p.id].color = pc.color;
       applyPersonaColor(p.id, pc.color);
     }
+    if (pc.activeAgent !== undefined) state.config[p.id].activeAgent = pc.activeAgent;
+    if (pc.memoryDepth !== undefined) state.config[p.id].memoryDepth = pc.memoryDepth;
+    if (pc.heartbeat !== undefined) state.config[p.id].heartbeat = pc.heartbeat;
+    if (pc.tools !== undefined) state.config[p.id].tools = pc.tools;
   });
   buildTargetButtons();
 }

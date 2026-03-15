@@ -663,6 +663,7 @@ export function scoreTopics(personaId, conversationMessages, windowSize = 6) {
 export function contextualToolDefs(personaId, conversationMessages, { heartbeat = false } = {}) {
   const toolStates  = state.config.settings.toolStates  || {};
   const customTools = state.config.settings.customTools || [];
+  const agentTools  = state.config[personaId]?.tools || null; // null = all
 
   const activeTopics  = scoreTopics(personaId, conversationMessages);
   const personaAllow  = PERSONA_TOPICS[personaId] ?? null;
@@ -670,6 +671,8 @@ export function contextualToolDefs(personaId, conversationMessages, { heartbeat 
   const currentNames = PERSONAS.map(p => (state.config[p.id].name || p.name).toLowerCase());
 
   const builtins = TOOL_DEFS.filter(t => {
+    // Per-agent tool whitelist (when set, only listed tools pass)
+    if (agentTools && !agentTools.includes(t.name)) return false;
     if (toolStates[t.name] === false) return false;
     if (toolStates[t.name] === true)  return true;
     if (heartbeat && t.name === 'reef_post') return false;
