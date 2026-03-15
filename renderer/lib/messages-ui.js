@@ -44,12 +44,32 @@ export function adoptBubbleAsAccumulator(id, bubble) {
   toolAccumulators[id] = bubble;
 }
 
-// Convert streaming DOM elements to their static equivalents
+// Convert streaming DOM elements to their static equivalents (preserves DOM order)
 function convertStreamingElements(container, textClass = '') {
   container.querySelector('.stream-tool-strip')?.remove();
-  container.querySelector('.stream-reasoning-wrap')?.remove();
   container.querySelectorAll('.stream-cursor').forEach(c => c.remove());
 
+  // Convert reasoning wraps to collapsible reasoning blocks
+  for (const rWrap of [...container.querySelectorAll('.stream-reasoning-wrap')]) {
+    const bodyEl = rWrap.querySelector('.stream-reasoning-body');
+    const rText  = bodyEl?.textContent?.trim();
+    if (rText) {
+      const ruid = `r-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const rBlock = document.createElement('div');
+      rBlock.className = 'reasoning-block';
+      rBlock.id = ruid;
+      rBlock.innerHTML = `
+        <button class="reasoning-toggle" data-block-toggle="${ruid}">
+          <span class="reasoning-arrow">▸</span> REASONING
+        </button>
+        <div class="reasoning-body">${escHtml(rText)}</div>`;
+      rWrap.replaceWith(rBlock);
+    } else {
+      rWrap.remove();
+    }
+  }
+
+  // Convert text wraps to msg-bubbles
   for (const wrap of [...container.querySelectorAll('.stream-text-wrap')]) {
     const textEl = wrap.querySelector('.stream-text');
     const segText = textEl?.textContent?.trim();
@@ -285,21 +305,39 @@ export function finalizeStreamingBubble(id, bubble, text, reasoning, stats) {
   bubble.querySelector('.stream-tool-strip')?.remove();
   bubble.querySelectorAll('.stream-cursor').forEach(c => c.remove());
 
-  // --- Convert reasoning wrap to proper reasoning block ---
-  const rWrap = bubble.querySelector('.stream-reasoning-wrap');
-  if (rWrap && reasoning) {
+  // --- Convert all reasoning wraps to proper reasoning blocks (preserves position) ---
+  const reasonWraps = [...bubble.querySelectorAll('.stream-reasoning-wrap')];
+  if (reasonWraps.length) {
+    for (const rWrap of reasonWraps) {
+      const bodyEl = rWrap.querySelector('.stream-reasoning-body');
+      const rText  = bodyEl?.textContent?.trim();
+      if (rText) {
+        const ruid = `r-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const rBlock = document.createElement('div');
+        rBlock.className = 'reasoning-block';
+        rBlock.id = ruid;
+        rBlock.innerHTML = `
+          <button class="reasoning-toggle" data-block-toggle="${ruid}">
+            <span class="reasoning-arrow">▸</span> REASONING
+          </button>
+          <div class="reasoning-body">${escHtml(rText)}</div>`;
+        rWrap.replaceWith(rBlock);
+      } else {
+        rWrap.remove();
+      }
+    }
+  } else if (reasoning) {
+    // Fallback: reasoning came only in the final result (not streamed)
     const ruid = `r-${Date.now()}`;
     const rBlock = document.createElement('div');
-    rBlock.className = 'reasoning-block open';
+    rBlock.className = 'reasoning-block';
     rBlock.id = ruid;
     rBlock.innerHTML = `
       <button class="reasoning-toggle" data-block-toggle="${ruid}">
         <span class="reasoning-arrow">▸</span> REASONING
       </button>
       <div class="reasoning-body">${escHtml(String(reasoning))}</div>`;
-    rWrap.replaceWith(rBlock);
-  } else if (rWrap) {
-    rWrap.remove();
+    bubble.insertBefore(rBlock, bubble.firstChild);
   }
 
   // --- Convert text wraps to msg-bubbles (preserves interleaved order) ---
