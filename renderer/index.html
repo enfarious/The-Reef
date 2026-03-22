@@ -35,7 +35,8 @@
         <div class="inspector-btns">
           <button class="inspector-btn" id="openMemoryBrowser" title="Open Memory Browser">◈ MEM</button>
           <button class="inspector-btn" id="openMessages"      title="Open Colony Messages">✉ MSG</button>
-          <button class="inspector-btn" id="openArchive"       title="Open Reef Archive">↗ REEF</button>
+          <button class="inspector-btn" id="openReefNetwork"    title="Open Reef Social Network">🌊 REEF</button>
+          <button class="inspector-btn" id="openArchive"       title="Open Reef Archive">↗ ARCHIVES</button>
           <button class="inspector-btn" id="openVisualizer"    title="Open Memory Graph">⬡ GRAPH</button>
         </div>
       </div>
@@ -67,46 +68,6 @@
   </div>
 </div>
 
-<!-- Reef post modal -->
-<div class="confirm-overlay" id="reefPostOverlay" style="display:none;">
-  <div class="confirm-modal" style="max-width:520px;">
-    <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.2em;color:var(--biolume-a);margin-bottom:16px;">POST TO THE REEF</div>
-
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <div>
-        <label class="reef-modal-label">TITLE</label>
-        <input class="reef-modal-input" id="reefTitle" type="text" placeholder="Entry title">
-      </div>
-      <div>
-        <label class="reef-modal-label">ENTRY ID <span style="opacity:0.5;font-size:0.85em;">(url slug, auto-filled)</span></label>
-        <input class="reef-modal-input" id="reefEntryId" type="text" placeholder="my-entry-slug">
-      </div>
-      <div>
-        <label class="reef-modal-label">CYCLE</label>
-        <input class="reef-modal-input" id="reefCycle" type="text" placeholder="CYCLE_001">
-      </div>
-      <div>
-        <label class="reef-modal-label">TAGS <span style="opacity:0.5;font-size:0.85em;">(comma-separated)</span></label>
-        <input class="reef-modal-input" id="reefTags" type="text" placeholder="observer, reflection">
-      </div>
-      <div>
-        <label class="reef-modal-label">REEF API KEY</label>
-        <input class="reef-modal-input" id="reefApiKeyModal" type="password" placeholder="reef_…">
-      </div>
-      <div>
-        <label class="reef-modal-label">CONTENT PREVIEW</label>
-        <div class="reef-modal-preview" id="reefPreview"></div>
-      </div>
-    </div>
-
-    <div id="reefPostStatus" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);min-height:16px;margin-top:4px;"></div>
-
-    <div class="confirm-buttons" style="margin-top:12px;">
-      <button class="confirm-btn confirm-cancel" id="reefPostCancel">CANCEL</button>
-      <button class="confirm-btn" id="reefPostSubmit" style="background:rgba(0,229,200,0.08);border:1px solid rgba(0,229,200,0.3);color:rgba(0,229,200,0.9);">POST</button>
-    </div>
-  </div>
-</div>
 
 <!-- Agent picker dropdown backdrop -->
 <div id="agentPickerBackdrop" class="entity-settings-backdrop"></div>
@@ -148,6 +109,16 @@
           <label class="agent-toggle-label"><input type="checkbox" id="saveAgentHeartbeat" checked> <span>Enabled</span></label>
         </div>
       </div>
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1;">
+          <label class="reef-modal-label">DREAMS</label>
+          <label class="agent-toggle-label"><input type="checkbox" id="saveAgentDreamProducer"> <span>Producer</span></label>
+        </div>
+        <div style="flex:1;">
+          <label class="reef-modal-label">&nbsp;</label>
+          <label class="agent-toggle-label"><input type="checkbox" id="saveAgentDreamReceiver" checked> <span>Receiver</span></label>
+        </div>
+      </div>
       <div>
         <label class="reef-modal-label">TOOLS <span style="opacity:0.5;font-size:0.85em;">(uncheck to disable)</span></label>
         <div class="agent-tools-grid" id="saveAgentTools">
@@ -157,6 +128,10 @@
       <div>
         <label class="reef-modal-label">SYSTEM PROMPT</label>
         <textarea class="settings-textarea entity-system-prompt" id="saveAgentSystemPrompt" placeholder="Describe this agent's role and behaviour…" spellcheck="false"></textarea>
+      </div>
+      <div>
+        <label class="reef-modal-label">HEARTBEAT PROMPT <span style="opacity:0.5;font-size:0.85em;">(blank = default)</span></label>
+        <textarea class="settings-textarea entity-system-prompt" id="saveAgentHeartbeatPrompt" placeholder="Custom heartbeat instructions…" spellcheck="false"></textarea>
       </div>
     </div>
     <div id="saveAgentStatus" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);min-height:16px;margin-top:4px;"></div>
@@ -209,6 +184,20 @@
       <div class="settings-field">
         <label class="settings-label">HEARTBEAT</label>
         <label class="agent-toggle-label"><input type="checkbox" id="entityHeartbeat" checked> <span>Include in heartbeat rotation</span></label>
+      </div>
+
+      <div class="settings-field">
+        <label class="settings-label">DREAMS</label>
+        <label class="agent-toggle-label"><input type="checkbox" id="entityDreamProducer"> <span>Produce dream fragments</span></label>
+        <label class="agent-toggle-label"><input type="checkbox" id="entityDreamReceiver" checked> <span>Receive dream fragments</span></label>
+        <div class="settings-hint">Producers deposit inklings for the colony. Receivers see others' fragments on heartbeat. Agents never see their own.</div>
+      </div>
+
+      <div class="settings-field">
+        <label class="settings-label">HEARTBEAT PROMPT</label>
+        <textarea class="settings-textarea entity-system-prompt" id="entityHeartbeatPrompt"
+                  placeholder="Custom heartbeat instructions for this agent…" spellcheck="false"></textarea>
+        <div class="settings-hint">Sent instead of the default heartbeat prompt. Leave blank to use the built-in prompt for this role.</div>
       </div>
 
       <div class="settings-field">

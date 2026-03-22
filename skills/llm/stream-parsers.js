@@ -156,7 +156,7 @@ function streamAnthropic(request, onChunk, resolve, reject, onRequest) {
 
         case 'content_block_start': {
           const cb    = data.content_block ?? {};
-          const block = { type: cb.type, content: '', id: cb.id ?? null, name: cb.name ?? null };
+          const block = { type: cb.type, content: '', id: cb.id ?? null, name: cb.name ?? null, signature: cb.signature ?? null };
           blocks.set(data.index, block);
           if (cb.type === 'tool_use') {
             onChunk({ type: 'tool_start', id: cb.id, name: cb.name });
@@ -174,6 +174,8 @@ function streamAnthropic(request, onChunk, resolve, reject, onRequest) {
           } else if (d.type === 'thinking_delta') {
             block.content += d.thinking;
             onChunk({ type: 'reasoning', delta: d.thinking });
+          } else if (d.type === 'signature_delta') {
+            block.signature = (block.signature || '') + (d.signature || '');
           } else if (d.type === 'input_json_delta') {
             block.content += d.partial_json;
           }
@@ -182,7 +184,10 @@ function streamAnthropic(request, onChunk, resolve, reject, onRequest) {
 
         case 'content_block_stop': {
           const block = blocks.get(data.index);
-          if (block?.type === 'tool_use') {
+          if (!block) break;
+          // Capture thinking signature (sent at block stop)
+          if (data.content_block?.signature) block.signature = data.content_block.signature;
+          if (block.type === 'tool_use') {
             let input = {};
             try { input = JSON.parse(block.content); } catch { /* keep empty */ }
             onChunk({ type: 'tool_done', id: block.id, name: block.name, input });
@@ -211,7 +216,9 @@ function streamAnthropic(request, onChunk, resolve, reject, onRequest) {
           content.push({ type: 'text', text: block.content });
           textParts.push(block.content);
         } else if (block.type === 'thinking') {
-          content.push({ type: 'thinking', thinking: block.content });
+          const thinkBlock = { type: 'thinking', thinking: block.content };
+          if (block.signature) thinkBlock.signature = block.signature;
+          content.push(thinkBlock);
           thinkParts.push(block.content);
         } else if (block.type === 'tool_use') {
           let input = {};

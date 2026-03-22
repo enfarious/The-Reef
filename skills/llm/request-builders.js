@@ -4,10 +4,11 @@
 // `tools` is always in Anthropic format (canonical).
 // buildOpenAIRequest converts to OpenAI function-calling format internally.
 
-function buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools }) {
-  const body = { model, max_tokens: 2048, messages };
+function buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools, thinking }) {
+  const body = { model, max_tokens: thinking ? 16384 : 2048, messages };
   if (systemPrompt) body.system = systemPrompt;
   if (tools?.length) body.tools = tools;
+  if (thinking) body.thinking = thinking;
 
   const headers = {
     'Content-Type': 'application/json',

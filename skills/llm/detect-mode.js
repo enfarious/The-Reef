@@ -27,4 +27,19 @@ function getModelsUrl(endpoint) {
   return `${base}/v1/models`;
 }
 
-module.exports = { detectMode, getModelsUrl };
+// ─── Model ID normalization ──────────────────────────────────────────────────
+// Anthropic OAuth rejects dot-style aliases (claude-opus-4.6) — normalize to
+// dash form (claude-opus-4-6).  Also fixes the old haiku ID.
+
+const MODEL_ALIASES = {
+  'claude-opus-4.6':            'claude-opus-4-6',
+  'claude-sonnet-4.6':          'claude-sonnet-4-6',
+  'claude-3-5-haiku-20241022':  'claude-haiku-4-5-20251001',
+  'claude-3-5-haiku-latest':    'claude-haiku-4-5-latest',
+};
+
+function normalizeModel(model) {
+  return MODEL_ALIASES[model] || model;
+}
+
+module.exports = { detectMode, getModelsUrl, normalizeModel };

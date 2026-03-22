@@ -10,11 +10,11 @@ const { fetchJsonGet }             = require('./http');
 const ANTHROPIC_MODELS = [
   { id: 'claude-opus-4-20250514',    maxContext: 200000 },
   { id: 'claude-sonnet-4-20250514',  maxContext: 200000 },
-  { id: 'claude-3-5-haiku-20241022', maxContext: 200000 },
-  // Aliases — point at the same models, handy for quick selection
-  { id: 'claude-opus-4.6',           maxContext: 200000 },
-  { id: 'claude-sonnet-4.6',         maxContext: 200000 },
-  { id: 'claude-3-5-haiku-latest',   maxContext: 200000 },
+  { id: 'claude-haiku-4-5-20251001', maxContext: 200000 },
+  // Short aliases (dashes, not dots — dots are rejected by OAuth endpoints)
+  { id: 'claude-opus-4-6',           maxContext: 200000 },
+  { id: 'claude-sonnet-4-6',         maxContext: 200000 },
+  { id: 'claude-haiku-4-5-latest',   maxContext: 200000 },
 ].map(m => ({
   id:           m.id,
   state:        'loaded',
@@ -33,7 +33,17 @@ const ANTHROPIC_MODELS = [
 
 async function fetchModels({ endpoint, apiKey }) {
   if (!endpoint) throw new Error('No endpoint configured.');
-  if (endpoint === 'claude-cli') throw new Error('Claude CLI proxy is not ready. Run "claude login" and restart the app.');
+  if (endpoint === 'claude-cli') {
+    // Resolve the sentinel to the live proxy URL
+    try {
+      const proxy = require('../claude-proxy');
+      const proxyUrl = proxy.endpoint();
+      if (proxyUrl) { endpoint = proxyUrl; }
+      else { throw new Error('not running'); }
+    } catch {
+      throw new Error('Claude CLI proxy is not ready. Run "claude login" and restart the app.');
+    }
+  }
 
   const mode = detectMode(endpoint);
 

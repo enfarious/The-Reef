@@ -81,19 +81,22 @@ const ANTHROPIC_PORT = 443;
  * Forwards a request to Anthropic, injecting our OAuth token.
  * Supports both streaming (SSE) and non-streaming responses.
  */
-function proxyToAnthropic(reqBody, res) {
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+function proxyToAnthropic(reqBody, res, attempt = 0) {
   const auth = getAuthHeader();
 
   const upstream_headers = {
     'content-type':      'application/json',
     'anthropic-version': '2023-06-01',
+    'anthropic-beta':    'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
     'content-length':    Buffer.byteLength(reqBody),
   };
 
   if (auth) {
     upstream_headers['authorization'] = auth;
   } else {
-    // No credentials — let Anthropic return the 401 so the UI can show it
     console.warn('[claude-proxy] No OAuth credentials found at', CREDS_PATH);
   }
 
@@ -105,16 +108,42 @@ function proxyToAnthropic(reqBody, res) {
     headers:  upstream_headers,
   };
 
+  const bodyKB = (reqBody.length / 1024).toFixed(1);
+  console.log(`[claude-proxy] → upstream POST /v1/messages  auth=${auth ? 'Bearer ...' + auth.slice(-8) : 'NONE'}  body=${bodyKB}KB  attempt=${attempt + 1}/${MAX_RETRIES + 1}`);
+
   const upstream = https.request(options, (upRes) => {
-    // Pass status + headers straight through
+    console.log(`[claude-proxy] ← upstream status=${upRes.statusCode}  content-type=${upRes.headers['content-type']}`);
+
+    // Retry on 500 (transient server errors)
+    if (upRes.statusCode === 500 && attempt < MAX_RETRIES) {
+      let errBody = '';
+      upRes.on('data', c => { errBody += c; });
+      upRes.on('end', () => {
+        console.warn(`[claude-proxy] ← 500 on attempt ${attempt + 1}, retrying in ${RETRY_DELAY_MS}ms...  body: ${errBody.slice(0, 200)}`);
+        setTimeout(() => proxyToAnthropic(reqBody, res, attempt + 1), RETRY_DELAY_MS);
+      });
+      return;
+    }
+
+    // Non-retryable errors — log and forward
+    if (upRes.statusCode >= 400) {
+      let errBody = '';
+      upRes.on('data', c => { errBody += c; });
+      upRes.on('end', () => {
+        console.error(`[claude-proxy] ← ERROR ${upRes.statusCode}: ${errBody.slice(0, 500)}`);
+        const outHeaders = { 'content-type': 'application/json', 'access-control-allow-origin': '*' };
+        res.writeHead(upRes.statusCode, outHeaders);
+        res.end(errBody);
+      });
+      return;
+    }
+
+    // Success — pass through
     const outHeaders = {};
     for (const [k, v] of Object.entries(upRes.headers)) {
-      // Strip hop-by-hop headers
-      if (!['transfer-encoding', 'connection', 'keep-alive'].includes(k)) {
-        outHeaders[k] = v;
-      }
+      if (['connection', 'keep-alive'].includes(k)) continue;
+      outHeaders[k] = v;
     }
-    // Always allow CORS from localhost (Electron renderer)
     outHeaders['access-control-allow-origin'] = '*';
 
     res.writeHead(upRes.statusCode, outHeaders);
@@ -123,6 +152,11 @@ function proxyToAnthropic(reqBody, res) {
 
   upstream.on('error', (err) => {
     console.error('[claude-proxy] upstream error:', err.message);
+    if (attempt < MAX_RETRIES) {
+      console.warn(`[claude-proxy] network error on attempt ${attempt + 1}, retrying...`);
+      setTimeout(() => proxyToAnthropic(reqBody, res, attempt + 1), RETRY_DELAY_MS);
+      return;
+    }
     if (!res.headersSent) {
       res.writeHead(502, { 'content-type': 'application/json' });
     }

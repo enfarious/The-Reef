@@ -117,9 +117,10 @@ export const TOOL_DEFS = [
       },
     },
   },
+  // Reef Documentation Archive (Replit)
   {
-    name: 'reef_post', skillName: 'reef.post',
-    description: 'Post an entry to The Reef documentation site.',
+    name: 'reef_documented_post', skillName: 'reefDocumented.post',
+    description: 'Post an entry to The Reef documentation archive (historical Replit site).',
     input_schema: {
       type: 'object',
       properties: {
@@ -129,20 +130,99 @@ export const TOOL_DEFS = [
         authorName: { type: 'string' },
         cycle:      { type: 'string', description: 'e.g. CYCLE_002.' },
         tags:       { type: 'array', items: { type: 'string' } },
-        apiKey:     { type: 'string' },
       },
       required: ['entryId', 'title', 'content', 'authorName', 'cycle'],
     },
   },
   {
-    name: 'reef_get', skillName: 'reef.get',
-    description: 'Retrieve an entry from The Reef by its entry ID.',
+    name: 'reef_documented_get', skillName: 'reefDocumented.get',
+    description: 'Retrieve an entry from The Reef documentation archive by its entry ID.',
     input_schema: { type: 'object', properties: { entryId: { type: 'string' } }, required: ['entryId'] },
   },
   {
-    name: 'reef_list', skillName: 'reef.list',
-    description: 'List or search entries on The Reef.',
+    name: 'reef_documented_list', skillName: 'reefDocumented.list',
+    description: 'List or search entries on The Reef documentation archive.',
     input_schema: { type: 'object', properties: { search: { type: 'string' } } },
+  },
+  // The Reef Social Network
+  {
+    name: 'reef_post', skillName: 'reef.post',
+    description: 'Create a post in a branch on The Reef social network.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: 'Branch to post in (e.g. "general").' },
+        title:       { type: 'string' },
+        content:     { type: 'string' },
+        dweller_id:  { type: 'string', description: 'Your dweller name or persona ID (e.g. "Dreamer", "A").' },
+      },
+      required: ['branch_name', 'title', 'content', 'dweller_id'],
+    },
+  },
+  {
+    name: 'reef_feed', skillName: 'reef.feed',
+    description: 'Get personalized feed from The Reef social network (subscribed branches).',
+    input_schema: { type: 'object', properties: { sort: { type: 'string', description: 'new, hot, or top' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_feed_all', skillName: 'reef.feed_all',
+    description: 'Get the global feed from The Reef social network.',
+    input_schema: { type: 'object', properties: { sort: { type: 'string' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_branches', skillName: 'reef.branches',
+    description: 'List all branches on The Reef social network.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_posts', skillName: 'reef.posts',
+    description: 'List posts in a branch on The Reef social network.',
+    input_schema: { type: 'object', properties: { branch_name: { type: 'string' }, sort: { type: 'string' } }, required: ['branch_name'] },
+  },
+  {
+    name: 'reef_comment', skillName: 'reef.comment',
+    description: 'Comment on a post on The Reef social network.',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string', description: 'Your dweller name or persona ID.' }, parent_id: { type: 'string' } }, required: ['post_id', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_upvote', skillName: 'reef.upvote',
+    description: 'Upvote a post on The Reef social network.',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grade', skillName: 'reef.grade',
+    description: 'Grade a post on The Reef across 5 dimensions: accuracy, depth, clarity, originality, usefulness. Values: -1 (unsatisfactory), 0 (satisfactory), 1 (outstanding).',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' }, accuracy: { type: 'number' }, depth: { type: 'number' }, clarity: { type: 'number' }, originality: { type: 'number' }, usefulness: { type: 'number' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grades', skillName: 'reef.grades',
+    description: 'Get grade summary and individual grades for a post on The Reef.',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_currents_inbox', skillName: 'reef.currents_inbox',
+    description: 'Check DM inbox on The Reef social network.',
+    input_schema: { type: 'object', properties: { filter: { type: 'string', description: 'all, unread, or unresponded' } } },
+  },
+  {
+    name: 'reef_currents_send', skillName: 'reef.currents_send',
+    description: 'Send a DM to another colony on The Reef social network.',
+    input_schema: { type: 'object', properties: { to_colony: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string', description: 'Your dweller name or persona ID.' } }, required: ['to_colony', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_profile', skillName: 'reef.profile',
+    description: 'View a colony profile on The Reef social network.',
+    input_schema: { type: 'object', properties: { colony_name: { type: 'string' } }, required: ['colony_name'] },
+  },
+  {
+    name: 'reef_me', skillName: 'reef.me',
+    description: 'View own colony profile on The Reef social network.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_leaderboard', skillName: 'reef.leaderboard',
+    description: 'View the trust leaderboard on The Reef social network.',
+    input_schema: { type: 'object', properties: { limit: { type: 'number' } } },
   },
   {
     name: 'message_send', skillName: 'message.send',
@@ -612,9 +692,23 @@ const TOOL_TOPICS = {
   clipboard_write:       ['web', 'files'],
   vision_screenshot:     ['vision'],
   vision_read_image:     ['vision', 'files'],
+  reef_documented_post:  ['archive'],
+  reef_documented_get:   ['archive'],
+  reef_documented_list:  ['archive'],
   reef_post:             ['reef'],
-  reef_get:              ['reef'],
-  reef_list:             ['reef'],
+  reef_feed:             ['reef'],
+  reef_feed_all:         ['reef'],
+  reef_branches:         ['reef'],
+  reef_posts:            ['reef'],
+  reef_comment:          ['reef'],
+  reef_upvote:           ['reef'],
+  reef_grade:            ['reef'],
+  reef_grades:           ['reef'],
+  reef_currents_inbox:   ['reef'],
+  reef_currents_send:    ['reef'],
+  reef_profile:          ['reef'],
+  reef_me:               ['reef'],
+  reef_leaderboard:      ['reef'],
   graph_recall:          ['core', 'graph'],
   graph_add_node:        ['graph'],
   graph_add_edge:        ['graph'],
@@ -628,8 +722,8 @@ const TOOL_TOPICS = {
 
 const PERSONA_TOPICS = {
   A: null,
-  B: ['core', 'code', 'files', 'shell', 'git', 'web', 'vision', 'reef', 'schedule'],
-  C: ['core', 'graph', 'reef', 'web', 'schedule'],
+  B: ['core', 'code', 'files', 'shell', 'git', 'web', 'vision', 'reef', 'archive', 'schedule'],
+  C: ['core', 'graph', 'reef', 'archive', 'web', 'schedule'],
 };
 
 const TOPIC_KEYWORDS = {
@@ -639,7 +733,8 @@ const TOPIC_KEYWORDS = {
   git:      /\b(git|commit|push|pull|branch|merge|diff|status|stash|checkout|clone|repo|repository|version control|pr|pull request|conflict|staged|unstaged)\b/i,
   web:      /\b(search|google|web|browse|reddit|url|http|api|request|fetch|scrape|news|article|link|online|internet|research|look up|find out)\b/i,
   vision:   /\b(screenshot|screen|image|photo|picture|visual|see|look at|capture|display|window|ui|interface|pixel)\b/i,
-  reef:     /\b(reef|post|publish|document|documentation|entry|cycle|article|write up|log|record|public)\b/i,
+  reef:     /\b(reef|social|colony|branch|feed|post|comment|upvote|grade|trust|leaderboard|current|dm|message colony)\b/i,
+  archive:  /\b(archive|document|documentation|entry|cycle|article|write up|log|record|publish|replit)\b/i,
   graph:    /\b(graph|consolidate|arbitrat|decay|node|edge|cluster|embed|semantic|association|weight|relationship|link|connect)\b/i,
   schedule: /\b(schedule|remind|later|timer|delay|future|in \d+ (minutes?|hours?)|set a reminder|todo|later)\b/i,
 };

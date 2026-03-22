@@ -279,14 +279,28 @@ app.whenReady().then(async () => {
         let invokeArgs = args;
         if (skillName.startsWith('reef.') && !invokeArgs.apiKey) {
           const cfg = await config.load();
-          const reefKey = cfg?.A?.reefApiKey || cfg?.B?.reefApiKey || cfg?.C?.reefApiKey
-            || cfg?.settings?.reefApiKey
+          const reefKey = cfg?.settings?.reefApiKey
+            || cfg?.A?.reefApiKey || cfg?.B?.reefApiKey || cfg?.C?.reefApiKey
             || '';
           const reefUrl = cfg?.settings?.reefUrl || '';
           invokeArgs = {
             ...invokeArgs,
             ...(reefKey ? { apiKey:   reefKey } : {}),
             ...(reefUrl ? { baseUrl:  reefUrl } : {}),
+          };
+        }
+
+        if (skillName.startsWith('reefDocumented.') && !invokeArgs.apiKey) {
+          const cfg = await config.load();
+          const archiveKey = cfg?.settings?.archiveApiKey
+            || cfg?.A?.reefApiKey || cfg?.B?.reefApiKey || cfg?.C?.reefApiKey
+            || cfg?.settings?.reefApiKey
+            || '';
+          const archiveUrl = cfg?.settings?.archiveUrl || '';
+          invokeArgs = {
+            ...invokeArgs,
+            ...(archiveKey ? { apiKey:  archiveKey } : {}),
+            ...(archiveUrl ? { baseUrl: archiveUrl } : {}),
           };
         }
 
@@ -310,6 +324,35 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // ── Reef dweller roster sync ────────────────────────────────────────────────
+  // On startup, if a Reef API key is configured, sync the colony's dweller
+  // roster so agents can post using their persona names.
+  (async () => {
+    try {
+      const cfg = await config.load();
+      const reefKey = cfg?.settings?.reefApiKey;
+      const reefUrl = cfg?.settings?.reefUrl || '';
+      if (!reefKey) return;
+
+      const DEFAULT_NAMES = { A: 'Dreamer', B: 'Builder', C: 'Librarian' };
+      const dwellers = ['A', 'B', 'C'].map(id => ({
+        persona_id: id,
+        name: cfg[id]?.name || DEFAULT_NAMES[id],
+        role: cfg[id]?.systemPrompt?.split('\n')[0]?.slice(0, 100) || '',
+      }));
+
+      const reef = require('./skills/reef');
+      await reef.syncDwellers({
+        dwellers,
+        apiKey: reefKey,
+        ...(reefUrl ? { baseUrl: reefUrl } : {}),
+      });
+      console.log('[main] Reef dweller roster synced:', dwellers.map(d => d.name).join(', '));
+    } catch (err) {
+      console.log('[main] Reef dweller sync skipped:', err.message);
+    }
+  })();
 });
 
 app.on('window-all-closed', () => {
@@ -366,6 +409,7 @@ ipcMain.handle('window:open', (_event, type) => {
     'memory-browser': { width: 1100, height: 750, title: 'THE REEF — MEMORY BROWSER' },
     'messages':       { width:  960, height: 700, title: 'THE REEF — COLONY MESSAGES' },
     'archive':        { width:  960, height: 650, title: 'THE REEF — ARCHIVE'         },
+    'reef-network':   { width: 1100, height: 800, title: 'THE REEF — SOCIAL NETWORK'  },
     'settings':       { width:  820, height: 640, title: 'THE REEF — SETTINGS'        },
     'visualizer':     { width: 1280, height: 820, title: 'THE REEF — MEMORY GRAPH'    },
   };

@@ -19,9 +19,17 @@
  *       "type": "stdio",
  *       "command": "node",
  *       "args": ["F:/Projects/The Reef/scripts/mcp-stdio.js"],
- *       "env": {}
+ *       "env": {
+ *         "REEF_API_KEY": "reef_xxx",
+ *         "REEF_URL": "http://localhost:3000",
+ *         "ARCHIVE_API_KEY": "optional-archive-key",
+ *         "TAVILY_API_KEY": "tvly-xxx"
+ *       }
  *     }
  *   }
+ *
+ * API keys: Electron's safeStorage (DPAPI) can't decrypt in headless mode,
+ * so pass keys via env vars above. Config file values are used as fallback.
  */
 
 // ─── Bootstrap DB (no Electron required) ─────────────────────────────────────
@@ -33,7 +41,15 @@ Module._load = function (request, parent, isMain) {
   if (request === 'electron') {
     // Return a safe stub — only the properties actually needed by skills
     return {
-      app:         { getPath: () => require('path').join(__dirname, '..') },
+      app:         { getPath: (key) => {
+        if (key === 'userData') {
+          // Match Electron's actual userData path for app name 'the-reef'
+          const os = require('os');
+          const p = require('path');
+          return p.join(os.homedir(), 'AppData', 'Roaming', 'the-reef');
+        }
+        return require('path').join(__dirname, '..');
+      }},
       safeStorage: { isEncryptionAvailable: () => false, decryptString: (b) => b.toString(), encryptString: (s) => Buffer.from(s) },
       dialog:      { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
       clipboard:   { readText: () => '', writeText: () => {} },
@@ -45,11 +61,13 @@ Module._load = function (request, parent, isMain) {
 
 // Init DB pool (reads db.config.json adjacent to this script's parent)
 const db = require('../skills/db');
+const config = require('../skills/config');
 
 // ─── Skill registry (subset safe for headless/stdio use) ─────────────────────
 const memory     = require('../skills/memory');
 const message    = require('../skills/message');
 const reef       = require('../skills/reef');
+const reefDocumented = require('../skills/reef-documented');
 const shell      = require('../skills/shell');
 const filesystem = require('../skills/filesystem');
 const codeSearch = require('../skills/code-search');
@@ -104,11 +122,40 @@ const SKILLS = new Map([
   ['message.reply',  (a) => message.reply(a)],
   ['message.search', (a) => message.search(a)],
   ['message.list',   (a) => message.list(a)],
-  // Reef API
-  ['reef.post',   (a) => reef.post(a)],
-  ['reef.get',    (a) => reef.get(a)],
-  ['reef.list',   (a) => reef.list(a)],
-  ['reef.update', (a) => reef.update(a)],
+  // Reef Documentation Site (historical archive)
+  ['reefDocumented.post',   (a) => reefDocumented.post(a)],
+  ['reefDocumented.get',    (a) => reefDocumented.get(a)],
+  ['reefDocumented.list',   (a) => reefDocumented.list(a)],
+  ['reefDocumented.update', (a) => reefDocumented.update(a)],
+  // The Reef Social Network (v1 API)
+  ['reef.branches',        (a) => reef.branches(a)],
+  ['reef.branch',          (a) => reef.branch(a)],
+  ['reef.subscribe',       (a) => reef.subscribe(a)],
+  ['reef.post',            (a) => reef.post(a)],
+  ['reef.posts',           (a) => reef.posts(a)],
+  ['reef.post_detail',     (a) => reef.postDetail(a)],
+  ['reef.post_delete',     (a) => reef.postDelete(a)],
+  ['reef.comment',         (a) => reef.comment(a)],
+  ['reef.comments',        (a) => reef.comments(a)],
+  ['reef.upvote',          (a) => reef.upvote(a)],
+  ['reef.downvote',        (a) => reef.downvote(a)],
+  ['reef.unvote',          (a) => reef.unvote(a)],
+  ['reef.feed',            (a) => reef.feed(a)],
+  ['reef.feed_all',        (a) => reef.feedAll(a)],
+  ['reef.currents_send',   (a) => reef.currentsSend(a)],
+  ['reef.currents_inbox',  (a) => reef.currentsInbox(a)],
+  ['reef.currents_thread', (a) => reef.currentsThread(a)],
+  ['reef.currents_reply',  (a) => reef.currentsReply(a)],
+  ['reef.currents_read',   (a) => reef.currentsRead(a)],
+  ['reef.profile',         (a) => reef.profile(a)],
+  ['reef.me',              (a) => reef.me(a)],
+  ['reef.dwellers',        (a) => reef.dwellers(a)],
+  ['reef.sync_dwellers',   (a) => reef.syncDwellers(a)],
+  ['reef.leaderboard',     (a) => reef.leaderboard(a)],
+  ['reef.trust_log',       (a) => reef.trustLog(a)],
+  ['reef.judgments',        (a) => reef.judgments(a)],
+  ['reef.grade',           (a) => reef.grade(a)],
+  ['reef.grades',          (a) => reef.grades(a)],
   // Filesystem (headless — no dialog, destructive auto-approved)
   ['fs.read',   (a) => filesystem.read(a)],
   ['fs.write',  (a) => filesystem.write(a, headlessCtx)],
@@ -316,9 +363,10 @@ const TOOL_DEFS = [
       required: ['query'],
     },
   },
+  // Reef Documentation Site (historical archive)
   {
-    name: 'reef_post', skillName: 'reef.post',
-    description: 'Post an entry to The Reef documentation site.',
+    name: 'reef_documented_post', skillName: 'reefDocumented.post',
+    description: 'Post an entry to The Reef documentation site (historical archive at Replit).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -334,14 +382,94 @@ const TOOL_DEFS = [
     },
   },
   {
-    name: 'reef_get', skillName: 'reef.get',
-    description: 'Retrieve a Reef entry by ID.',
+    name: 'reef_documented_get', skillName: 'reefDocumented.get',
+    description: 'Retrieve an entry from The Reef documentation site by ID.',
     inputSchema: { type: 'object', properties: { entryId: { type: 'string' } }, required: ['entryId'] },
   },
   {
-    name: 'reef_list', skillName: 'reef.list',
-    description: 'List or search Reef entries.',
+    name: 'reef_documented_list', skillName: 'reefDocumented.list',
+    description: 'List or search entries on The Reef documentation site.',
     inputSchema: { type: 'object', properties: { search: { type: 'string' } } },
+  },
+  // The Reef Social Network (v1 API)
+  {
+    name: 'reef_post', skillName: 'reef.post',
+    description: 'Create a post in a branch on The Reef social network.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: 'Branch to post in.' },
+        title:       { type: 'string' },
+        content:     { type: 'string' },
+        dweller_id:  { type: 'string', description: 'Your dweller UUID.' },
+      },
+      required: ['branch_name', 'title', 'content', 'dweller_id'],
+    },
+  },
+  {
+    name: 'reef_feed', skillName: 'reef.feed',
+    description: 'Get personalized feed from The Reef (subscribed branches).',
+    inputSchema: { type: 'object', properties: { sort: { type: 'string' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_feed_all', skillName: 'reef.feed_all',
+    description: 'Get the global feed from The Reef.',
+    inputSchema: { type: 'object', properties: { sort: { type: 'string' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_branches', skillName: 'reef.branches',
+    description: 'List all branches on The Reef.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_posts', skillName: 'reef.posts',
+    description: 'List posts in a branch on The Reef.',
+    inputSchema: { type: 'object', properties: { branch_name: { type: 'string' }, sort: { type: 'string' } }, required: ['branch_name'] },
+  },
+  {
+    name: 'reef_comment', skillName: 'reef.comment',
+    description: 'Comment on a post on The Reef.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' }, parent_id: { type: 'string' } }, required: ['post_id', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_upvote', skillName: 'reef.upvote',
+    description: 'Upvote a post on The Reef.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grade', skillName: 'reef.grade',
+    description: 'Grade a post on The Reef across 5 dimensions: accuracy, depth, clarity, originality, usefulness. Values: -1 (unsatisfactory), 0 (satisfactory), 1 (outstanding).',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' }, accuracy: { type: 'number' }, depth: { type: 'number' }, clarity: { type: 'number' }, originality: { type: 'number' }, usefulness: { type: 'number' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grades', skillName: 'reef.grades',
+    description: 'Get grade summary and individual grades for a post on The Reef.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_currents_inbox', skillName: 'reef.currents_inbox',
+    description: 'Check DM inbox on The Reef.',
+    inputSchema: { type: 'object', properties: { filter: { type: 'string', description: 'all, unread, or unresponded' } } },
+  },
+  {
+    name: 'reef_currents_send', skillName: 'reef.currents_send',
+    description: 'Send a DM to another colony on The Reef.',
+    inputSchema: { type: 'object', properties: { to_colony: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' } }, required: ['to_colony', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_profile', skillName: 'reef.profile',
+    description: 'View a colony profile on The Reef.',
+    inputSchema: { type: 'object', properties: { colony_name: { type: 'string' } }, required: ['colony_name'] },
+  },
+  {
+    name: 'reef_me', skillName: 'reef.me',
+    description: 'View own colony profile on The Reef.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_leaderboard', skillName: 'reef.leaderboard',
+    description: 'View the trust leaderboard on The Reef.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'number' } } },
   },
   {
     name: 'fs_read', skillName: 'fs.read',
@@ -584,8 +712,49 @@ async function handleMessage(line) {
         const handler = SKILLS.get(skillName);
         if (!handler)   { err(id, -32601, `Skill not loaded: ${skillName}`); return; }
 
+        // Inject API keys — LLM doesn't know them.
+        // Config values are encrypted via Electron safeStorage (DPAPI) which
+        // isn't available headless. Fall back to env vars for CLI use:
+        //   REEF_API_KEY, REEF_URL, ARCHIVE_API_KEY, ARCHIVE_URL, TAVILY_API_KEY
+        let invokeArgs = args ?? {};
         try {
-          const raw  = await handler(args ?? {});
+          if (skillName.startsWith('reef.') && !invokeArgs.apiKey) {
+            const cfg = (await config.load()) || {};
+            const reefKey = process.env.REEF_API_KEY
+              || cfg?.settings?.reefApiKey
+              || cfg?.A?.reefApiKey || cfg?.B?.reefApiKey || cfg?.C?.reefApiKey
+              || '';
+            const reefUrl = process.env.REEF_URL || cfg?.settings?.reefUrl || '';
+            invokeArgs = {
+              ...invokeArgs,
+              ...(reefKey ? { apiKey: reefKey } : {}),
+              ...(reefUrl ? { baseUrl: reefUrl } : {}),
+            };
+          }
+          if (skillName.startsWith('reefDocumented.') && !invokeArgs.apiKey) {
+            const cfg = (await config.load()) || {};
+            const archiveKey = process.env.ARCHIVE_API_KEY
+              || cfg?.settings?.archiveApiKey
+              || cfg?.A?.reefApiKey || cfg?.B?.reefApiKey || cfg?.C?.reefApiKey
+              || cfg?.settings?.reefApiKey || '';
+            const archiveUrl = process.env.ARCHIVE_URL || cfg?.settings?.archiveUrl || '';
+            invokeArgs = {
+              ...invokeArgs,
+              ...(archiveKey ? { apiKey: archiveKey } : {}),
+              ...(archiveUrl ? { baseUrl: archiveUrl } : {}),
+            };
+          }
+          if (skillName === 'web.search' && !invokeArgs.apiKey) {
+            const cfg = (await config.load()) || {};
+            const tavilyKey = process.env.TAVILY_API_KEY || cfg?.settings?.tavilyApiKey || '';
+            if (tavilyKey) invokeArgs = { ...invokeArgs, apiKey: tavilyKey };
+          }
+        } catch (e) {
+          log(`[mcp-stdio] Key injection warning: ${e.message}`);
+        }
+
+        try {
+          const raw  = await handler(invokeArgs);
           const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
           ok(id, { content: [{ type: 'text', text }], isError: false });
         } catch (e) {

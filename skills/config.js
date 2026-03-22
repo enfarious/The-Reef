@@ -15,6 +15,7 @@ function configPath() {
 
 const SENSITIVE_PATHS = [
   'settings.reefApiKey',
+  'settings.archiveApiKey',
   'settings.tavilyApiKey',
   'global.apiKey',
   'A.apiKey',    'A.reefApiKey',
@@ -65,11 +66,32 @@ function _transform(data, fn) {
 
 // ─── Public API ────────────────────────────────────────────────────────────────
 
+// Path for plaintext key export (readable by headless MCP server)
+function keysPath() {
+  return path.join(app.getPath('userData'), 'reef-keys.json');
+}
+
+// Export just the sensitive values as plaintext for headless consumers
+function _exportKeys(data) {
+  const keys = {};
+  for (const p of SENSITIVE_PATHS) {
+    const v = _get(data, p);
+    if (typeof v === 'string' && v !== '') _set(keys, p, v);
+  }
+  return keys;
+}
+
 async function save(data) {
   const p = configPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const encrypted = _transform(data, _encrypt);
   fs.writeFileSync(p, JSON.stringify(encrypted, null, 2), 'utf8');
+
+  // Write plaintext keys for headless MCP server access
+  try {
+    fs.writeFileSync(keysPath(), JSON.stringify(_exportKeys(data), null, 2), 'utf8');
+  } catch { /* non-fatal */ }
+
   return true;
 }
 
@@ -78,7 +100,23 @@ async function load() {
   if (!fs.existsSync(p)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return _transform(raw, _decrypt);
+    const decrypted = _transform(raw, _decrypt);
+
+    // If decryption isn't available (headless), overlay plaintext keys
+    if (!safeStorage.isEncryptionAvailable()) {
+      try {
+        const kp = keysPath();
+        if (fs.existsSync(kp)) {
+          const keys = JSON.parse(fs.readFileSync(kp, 'utf8'));
+          for (const sp of SENSITIVE_PATHS) {
+            const v = _get(keys, sp);
+            if (typeof v === 'string' && v !== '') _set(decrypted, sp, v);
+          }
+        }
+      } catch { /* use whatever we have */ }
+    }
+
+    return decrypted;
   } catch {
     return null;
   }

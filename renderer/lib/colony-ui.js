@@ -25,7 +25,6 @@ export function buildColony() {
             <button class="reef-post-btn" data-persona-pulse="${p.id}" title="Trigger heartbeat check-in">♥ BEAT</button>
             <span class="ctx-counter" id="ctx-${p.id}" title="Context size (messages · estimated tokens)">0</span>
             <button class="reef-post-btn" data-persona-fold="${p.id}" title="Compact context to memory">⊡ FOLD</button>
-            <button class="reef-post-btn" data-persona-post="${p.id}">→ REEF</button>
             <button class="reef-post-btn stop-btn" id="stop-${p.id}" data-persona-stop="${p.id}" title="Interrupt this entity" style="display:none">✕</button>
             <div class="status-dot" id="dot-${p.id}"></div>
           </div>

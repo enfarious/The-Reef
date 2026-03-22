@@ -15,11 +15,14 @@ export function collectConfig() {
     const isCliProxy    = endpointEl.dataset.claudeCli === '1';
     const endpointToSave = isCliProxy ? 'claude-cli' : rawEndpoint;
     cfg[p.id] = {
-      endpoint:     endpointToSave,
-      model:        document.getElementById(`model-${p.id}`).value,
-      systemPrompt: state.config[p.id].systemPrompt || '',
-      apiKey:       document.getElementById(`apikey-${p.id}`).value,
-      reefApiKey:   state.config[p.id].reefApiKey || '',
+      endpoint:        endpointToSave,
+      model:           document.getElementById(`model-${p.id}`).value,
+      systemPrompt:    state.config[p.id].systemPrompt || '',
+      heartbeatPrompt: state.config[p.id].heartbeatPrompt || '',
+      dreamProducer:   state.config[p.id].dreamProducer === true,
+      dreamReceiver:   state.config[p.id].dreamReceiver !== false,
+      apiKey:          document.getElementById(`apikey-${p.id}`).value,
+      reefApiKey:      state.config[p.id].reefApiKey || '',
       name:  state.config[p.id].name  || '',
       role:  state.config[p.id].role  || '',
       color: state.config[p.id].color || '',
@@ -86,6 +89,7 @@ export function applyConfig(cfg) {
     }
     if (pc.model)        document.getElementById(`model-${p.id}`).value       = pc.model;
     if (pc.systemPrompt) state.config[p.id].systemPrompt = pc.systemPrompt;
+    if (pc.heartbeatPrompt !== undefined) state.config[p.id].heartbeatPrompt = pc.heartbeatPrompt;
     if (pc.apiKey)       document.getElementById(`apikey-${p.id}`).value      = pc.apiKey;
     if (pc.reefApiKey)   state.config[p.id].reefApiKey = pc.reefApiKey;
     if (pc.name) {
@@ -105,6 +109,8 @@ export function applyConfig(cfg) {
     if (pc.activeAgent !== undefined) state.config[p.id].activeAgent = pc.activeAgent;
     if (pc.memoryDepth !== undefined) state.config[p.id].memoryDepth = pc.memoryDepth;
     if (pc.heartbeat !== undefined) state.config[p.id].heartbeat = pc.heartbeat;
+    if (pc.dreamProducer !== undefined) state.config[p.id].dreamProducer = pc.dreamProducer;
+    if (pc.dreamReceiver !== undefined) state.config[p.id].dreamReceiver = pc.dreamReceiver;
     if (pc.tools !== undefined) state.config[p.id].tools = pc.tools;
   });
   buildTargetButtons();

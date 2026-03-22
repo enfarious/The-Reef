@@ -56,7 +56,15 @@ export async function executeTool(callerPersonaId, toolCall) {
     invokeArgs = {
       ...input,
       baseUrl: s.reefUrl    || undefined,
-      apiKey:  input.apiKey || entityReefKey || s.reefApiKey || undefined,
+      apiKey:  input.apiKey || s.reefApiKey || entityReefKey || undefined,
+    };
+  } else if (skillName.startsWith('reefDocumented.')) {
+    const s = state.config.settings;
+    const entityReefKey = state.config[callerPersonaId]?.reefApiKey;
+    invokeArgs = {
+      ...input,
+      baseUrl: s.archiveUrl || undefined,
+      apiKey:  input.apiKey || s.archiveApiKey || entityReefKey || s.reefApiKey || undefined,
     };
   } else if (skillName === 'web.search' && !input.apiKey) {
     const tavilyKey = state.config.settings.tavilyApiKey || '';
@@ -66,6 +74,9 @@ export async function executeTool(callerPersonaId, toolCall) {
   } else if ((skillName === 'shell.run' || skillName === 'code.search' || skillName.startsWith('git.'))
              && state.cwd && !input.cwd) {
     invokeArgs = { ...input, cwd: state.cwd };
+  } else if (skillName === 'working_memory.write') {
+    // Auto-tag dream fragments with the producing persona so receivers can filter out their own
+    invokeArgs = { ...input, leftBy: callerPersonaId };
   }
 
   const result = await window.reef.invoke(skillName, invokeArgs);

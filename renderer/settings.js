@@ -99,6 +99,8 @@ function buildSettings() {
   return {
     reefUrl:           val('sReefUrl'),
     reefApiKey:        val('sReefApiKey'),
+    archiveUrl:        val('sArchiveUrl'),
+    archiveApiKey:     val('sArchiveApiKey'),
     tavilyApiKey:      val('sTavilyApiKey'),
     colonyName:        val('sColonyName'),
     baseSystemPrompt:  val('sBasePrompt'),
@@ -111,7 +113,11 @@ function buildSettings() {
     contextWindow:     Math.max(512, parseInt(val('sContextWindow'),   10) || 4096),
     maxToolSteps:      Math.min(20, Math.max(1, parseInt(val('sMaxToolSteps'),   10) || 5)),
     maxThinkingTime:   Math.max(0,             parseInt(val('sMaxThinkingTime'), 10) || 0),
-    streamChat:        document.getElementById('sStreamChat')?.checked ?? false,
+    streamChat:                       document.getElementById('sStreamChat')?.checked ?? false,
+    defaultHeartbeatPrompt:          val('sDefaultHeartbeatPrompt'),
+    defaultLibrarianHeartbeatPrompt: val('sDefaultLibrarianHeartbeatPrompt'),
+    defaultDreamProducer:            document.getElementById('sDefaultDreamProducer')?.checked ?? false,
+    defaultDreamReceiver:            document.getElementById('sDefaultDreamReceiver')?.checked ?? true,
     toolStates:        s.toolStates  || {},
     customTools:       s.customTools || [],
     cwd:               s.cwd         || null,
@@ -142,10 +148,18 @@ function populate(cfg) {
   set('sMaxThinkingTime',   s.maxThinkingTime   ?? 120);
   set('sReefUrl',           s.reefUrl           || '');
   set('sReefApiKey',        s.reefApiKey        || '');
+  set('sArchiveUrl',        s.archiveUrl        || '');
+  set('sArchiveApiKey',     s.archiveApiKey     || '');
   set('sTavilyApiKey',      s.tavilyApiKey      || '');
   set('sOperatorName',      s.operatorName      || '');
   set('sOperatorBirthdate', s.operatorBirthdate || '');
   set('sOperatorAbout',     s.operatorAbout     || '');
+  set('sDefaultHeartbeatPrompt',          s.defaultHeartbeatPrompt          || '');
+  set('sDefaultLibrarianHeartbeatPrompt', s.defaultLibrarianHeartbeatPrompt || '');
+  const dpEl = document.getElementById('sDefaultDreamProducer');
+  if (dpEl) dpEl.checked = s.defaultDreamProducer === true;
+  const drEl = document.getElementById('sDefaultDreamReceiver');
+  if (drEl) drEl.checked = s.defaultDreamReceiver !== false;
   setFontScale(s.fontScale  || 100);
   buildColorPalette(s.fontColors || 'cool');
   setStreamChat(s.streamChat ?? false);
@@ -328,9 +342,14 @@ function flash(el) {
 
 // ─── Field change listeners ───────────────────────────────────────────────────
 
-['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sTavilyApiKey',
- 'sOperatorName', 'sOperatorBirthdate', 'sOperatorAbout'].forEach(id => {
-  document.getElementById(id).addEventListener('input', scheduleSave);
+['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sArchiveUrl', 'sArchiveApiKey', 'sTavilyApiKey',
+ 'sOperatorName', 'sOperatorBirthdate', 'sOperatorAbout',
+ 'sDefaultHeartbeatPrompt', 'sDefaultLibrarianHeartbeatPrompt'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', scheduleSave);
+});
+
+['sDefaultDreamProducer', 'sDefaultDreamReceiver'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', scheduleSave);
 });
 
 document.getElementById('sHeartbeatInterval').addEventListener('change', e => {

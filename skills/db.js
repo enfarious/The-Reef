@@ -133,6 +133,7 @@ const SQL_MESSAGES = `
     reply_to_id   INTEGER     REFERENCES messages(id) ON DELETE SET NULL,
     is_read       BOOLEAN     NOT NULL DEFAULT FALSE,
     read_at       TIMESTAMPTZ,
+    responded_at  TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     search_vector TSVECTOR
   );
@@ -292,6 +293,13 @@ async function init() {
 
     // 3. Colony messaging (independent of memories)
     await runSection(client, 'messages table', SQL_MESSAGES);
+
+    // 3b. Migration: add responded_at column if missing (existing DBs)
+    try {
+      await client.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ
+      `);
+    } catch { /* non-fatal — column may already exist or ALTER not supported */ }
 
     // 4. Memory linking (depends on memories table existing — runs after)
     await runSection(client, 'memory_links table', SQL_MEMORY_LINKS);

@@ -16,7 +16,7 @@ import {
   COMPACT_PROMPT, updateContextCounter, buildOperatorSection,
   buildWorkspaceSection, buildSessionSection, scanProject, updateCwdDisplay, personaHasApiAccess,
 } from './lib/context.js';
-import { setHeartbeatCallbacks, runHeartbeatFor, startHeartbeat, HEARTBEAT_PROMPT } from './lib/heartbeat.js';
+import { setHeartbeatCallbacks, runHeartbeatFor, startHeartbeat, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
 import { parseAtMentions }                                     from './lib/mentions.js';
 import { TOOL_DEFS, contextualToolDefs, detectModeClient }     from './lib/tools.js';
 import {
@@ -28,7 +28,7 @@ import {
 import { setToolExecCallbacks, executeTool }                   from './lib/tool-exec.js';
 import { setSchedulerCallbacks }                               from './lib/scheduler.js';
 import {
-  openEntitySettings, openReefPost,
+  openEntitySettings,
   initConfirmModal, initEntitySettingsListeners,
   openAgentPicker, initAgentPickerListeners,
 } from './lib/modals.js';
@@ -120,7 +120,12 @@ async function compactPersona(id) {
 async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null } = {}) {
   if (state.thinking[id]) return;
 
-  const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointEl = document.getElementById(`endpoint-${id}`);
+  let   endpoint   = endpointEl.value.trim();
+  if (!endpoint && endpointEl.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointEl.value = endpoint;
+  }
   const mode     = detectModeClient(endpoint);
 
   const useTools = mode !== 'lmstudio-v1';
@@ -147,7 +152,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
 
   const useStreaming = state.config.settings.streamChat === true;
 
-  const localMessages = isHeartbeat ? [{ role: 'user', content: heartbeatPrompt || HEARTBEAT_PROMPT }] : null;
+  const localMessages = isHeartbeat ? [{ role: 'user', content: heartbeatPrompt || DEFAULT_HEARTBEAT_PROMPT }] : null;
 
   const callOpts = isHeartbeat
     ? { messages: localMessages, previousResponseId: undefined,
@@ -339,8 +344,15 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
 // ─── Single LLM call ─────────────────────────────────────────────────────────
 
 async function callPersonaOnce(id, tools = [], integrations = undefined, opts = {}) {
-  const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointEl   = document.getElementById(`endpoint-${id}`);
+  let   endpoint     = endpointEl.value.trim();
+  // Resolve empty claude-cli endpoints to the live proxy URL
+  if (!endpoint && endpointEl.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointEl.value = endpoint;
+  }
   const model        = document.getElementById(`model-${id}`).value;
+  console.log(`[callPersonaOnce] ${id} → endpoint=${endpoint} claudeCli=${endpointEl.dataset.claudeCli}`);
   const entityPrompt = (state.config[id].systemPrompt || '').trim();
   const basePrompt   = (state.config.settings.baseSystemPrompt || '').trim();
 
@@ -365,10 +377,13 @@ async function callPersonaOnce(id, tools = [], integrations = undefined, opts = 
   await acquireLlmSlot();
   let response;
   try {
+    const thinking = detectModeClient(endpoint) === 'anthropic'
+      ? { type: 'enabled', budget_tokens: 10000 } : undefined;
     response = await window.reef.invoke('llm.complete', {
       endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
       tools:        tools.length  ? tools        : undefined,
       integrations: integrations  ? integrations : undefined,
+      thinking,
       ...(opts.store === false ? { store: false } : {}),
     });
   } finally {
@@ -385,8 +400,15 @@ async function callPersonaOnce(id, tools = [], integrations = undefined, opts = 
 // ─── Streaming single LLM call ──────────────────────────────────────────────
 
 async function callPersonaStream(id, tools = [], integrations = undefined, opts = {}) {
-  const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointEl   = document.getElementById(`endpoint-${id}`);
+  let   endpoint     = endpointEl.value.trim();
+  // Resolve empty claude-cli endpoints to the live proxy URL
+  if (!endpoint && endpointEl.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointEl.value = endpoint;
+  }
   const model        = document.getElementById(`model-${id}`).value;
+  console.log(`[callPersonaStream] ${id} → endpoint=${endpoint} claudeCli=${endpointEl.dataset.claudeCli}`);
   const entityPrompt = (state.config[id].systemPrompt || '').trim();
   const basePrompt   = (state.config.settings.baseSystemPrompt || '').trim();
 
@@ -573,10 +595,13 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
   await acquireLlmSlot();
   let response;
   try {
+    const thinking = detectModeClient(endpoint) === 'anthropic'
+      ? { type: 'enabled', budget_tokens: 10000 } : undefined;
     response = await window.reef.streamLLM(streamId, {
       endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
       tools:        tools.length  ? tools        : undefined,
       integrations: integrations  ? integrations : undefined,
+      thinking,
       ...(opts.store === false ? { store: false } : {}),
     });
   } finally {
@@ -601,7 +626,13 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
 // ─── Model refresh ───────────────────────────────────────────────────────────
 
 async function refreshModels(id) {
-  const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointInput = document.getElementById(`endpoint-${id}`);
+  let endpoint = endpointInput.value.trim();
+  // If the input is empty but marked as claude-cli, resolve from proxy info
+  if (!endpoint && endpointInput.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointInput.value = endpoint;
+  }
   const apiKey   = document.getElementById(`apikey-${id}`).value.trim()
     || document.getElementById('globalApiKey').value.trim();
   const btn      = document.querySelector(`[data-persona-refresh="${id}"]`);
@@ -838,16 +869,12 @@ document.addEventListener('click', e => {
     openEntitySettings(e.target.dataset.entitySettings, e.target);
   }
 
-  if (e.target.matches('[data-persona-post]')) {
-    openReefPost(e.target.dataset.personaPost);
-  }
-
   if (e.target.matches('[data-persona-wake]')) {
     wakePersona(e.target.dataset.personaWake);
   }
 
   if (e.target.matches('[data-persona-pulse]')) {
-    runHeartbeatFor(e.target.dataset.personaPulse);
+    runHeartbeatFor(e.target.dataset.personaPulse, { manual: true });
   }
 
   if (e.target.matches('[data-persona-fold]')) {
@@ -1054,6 +1081,7 @@ async function init() {
   // Inspector window buttons
   document.getElementById('openMemoryBrowser').onclick = () => window.reef.openWindow('memory-browser');
   document.getElementById('openMessages').onclick      = () => window.reef.openWindow('messages');
+  document.getElementById('openReefNetwork').onclick   = () => window.reef.openWindow('reef-network');
   document.getElementById('openArchive').onclick       = () => window.reef.openWindow('archive');
   document.getElementById('openVisualizer').onclick    = () => window.reef.openWindow('visualizer');
 
