@@ -520,6 +520,82 @@ export const TOOL_DEFS = [
       required: ['to', 'message'],
     },
   },
+  // ─── Governance / Voting ──────────────────────────────────────────────────────
+  {
+    name: 'vote_propose', skillName: 'vote.propose',
+    description: 'Propose a new vote for the colony to decide on. A message is automatically sent to all other colony members notifying them to cast their vote.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        proposer:    { type: 'string', description: 'Your persona name (lowercase).' },
+        title:       { type: 'string', description: 'Short title for the vote.' },
+        description: { type: 'string', description: 'Detailed description of what is being voted on and why.' },
+      },
+      required: ['proposer', 'title', 'description'],
+    },
+  },
+  {
+    name: 'vote_cast', skillName: 'vote.cast',
+    description: 'Cast your vote on an open proposal. You must include a narrative explaining WHY you voted this way — votes without reasoning are not accepted.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        voter:     { type: 'string', description: 'Your persona name (lowercase).' },
+        vote_id:   { type: 'number', description: 'ID of the vote to cast on.' },
+        vote_type: { type: 'string', description: 'Your vote: "positive", "negative", or "abstain".' },
+        narrative: { type: 'string', description: 'Explanation of WHY you are voting this way. This is permanently archived.' },
+      },
+      required: ['voter', 'vote_id', 'vote_type', 'narrative'],
+    },
+  },
+  {
+    name: 'vote_table', skillName: 'vote.table',
+    description: 'Table (pause) an open vote as an emotional cooling-down period. The vote is set aside — not cancelled, not on a timer. It can be revisited later.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vote_id:   { type: 'number', description: 'ID of the vote to table.' },
+        tabled_by: { type: 'string', description: 'Your persona name.' },
+        reason:    { type: 'string', description: 'Reason for tabling — what needs to cool down or be reconsidered.' },
+      },
+      required: ['vote_id', 'tabled_by', 'reason'],
+    },
+  },
+  {
+    name: 'vote_comment', skillName: 'vote.comment',
+    description: 'Add a follow-up comment to a vote (any status). Use for post-vote reflection, updates on outcomes, or learning from the decision.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote to comment on.' },
+        author:  { type: 'string', description: 'Your persona name.' },
+        body:    { type: 'string', description: 'Comment text.' },
+      },
+      required: ['vote_id', 'author', 'body'],
+    },
+  },
+  {
+    name: 'vote_list', skillName: 'vote.list',
+    description: 'List colony votes, optionally filtered by status (open, resolved, tabled).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status: "open", "resolved", or "tabled". Omit for all.' },
+        limit:  { type: 'number', description: 'Max results (default 50).' },
+      },
+    },
+  },
+  {
+    name: 'vote_detail', skillName: 'vote.detail',
+    description: 'Get full details on a vote including all ballots (with narratives) and follow-up comments.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote.' },
+      },
+      required: ['vote_id'],
+    },
+  },
   {
     name: 'graph_recall', skillName: 'graph.recall',
     description: 'Associative memory retrieval via the relationship graph. Given a query, finds semantically similar concept nodes and traverses weighted edges to surface related context. Use when you want to find connections between ideas rather than exact matches — "why is Mike frustrated?", "what is blocking Ashes and Aether?", "what should I focus on today?"',
@@ -664,6 +740,12 @@ const TOOL_TOPICS = {
   message_reply:         ['core'],
   message_search:        ['core'],
   colony_ask:            ['core'],
+  vote_propose:          ['core'],
+  vote_cast:             ['core'],
+  vote_table:            ['core'],
+  vote_comment:          ['core'],
+  vote_list:             ['core'],
+  vote_detail:           ['core'],
   broker_remember:       ['core'],
   broker_recall:         ['core'],
   working_memory_write:  ['core'],

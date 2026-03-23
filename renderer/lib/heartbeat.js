@@ -93,7 +93,7 @@ export async function runHeartbeatFor(personaId, { manual = false } = {}) {
   let heartbeatPrompt;
   if (customPrompt) {
     heartbeatPrompt = customPrompt;
-  } else if (personaId === 'C') {
+  } else if (personaId === 'A') {
     heartbeatPrompt = (state.config.settings.defaultLibrarianHeartbeatPrompt || '').trim()
       || DEFAULT_LIBRARIAN_HEARTBEAT_PROMPT;
   } else {

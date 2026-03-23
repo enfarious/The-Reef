@@ -1083,7 +1083,23 @@ async function init() {
   document.getElementById('openMessages').onclick      = () => window.reef.openWindow('messages');
   document.getElementById('openReefNetwork').onclick   = () => window.reef.openWindow('reef-network');
   document.getElementById('openArchive').onclick       = () => window.reef.openWindow('archive');
+  document.getElementById('openVotes').onclick         = () => window.reef.openWindow('votes');
   document.getElementById('openVisualizer').onclick    = () => window.reef.openWindow('visualizer');
+
+  // ─── Governance pulse check ───────────────────────────────────────────────────
+  async function checkOpenVotes() {
+    try {
+      const result = await window.reef.invoke('vote.list', { status: 'open', limit: 1 });
+      const btn = document.getElementById('openVotes');
+      if (result.ok && result.result && result.result.length > 0) {
+        btn.classList.add('vote-flash');
+      } else {
+        btn.classList.remove('vote-flash');
+      }
+    } catch { /* silent */ }
+  }
+  setInterval(checkOpenVotes, 30_000);
+  setTimeout(checkOpenVotes, 5_000); // first check after settle
 
   // Load saved config
   const saved = await window.reef.loadConfig();

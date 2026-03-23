@@ -251,6 +251,50 @@ const SQL_GRAPH_ARCHIVE = `
   CREATE INDEX IF NOT EXISTS idx_archive_to   ON graph_archive(to_id);
 `;
 
+// ── 7. Governance / voting tables ────────────────────────────────────────────
+const SQL_VOTES = `
+  CREATE TABLE IF NOT EXISTS votes (
+    id            SERIAL      PRIMARY KEY,
+    proposer      TEXT        NOT NULL,
+    title         TEXT        NOT NULL,
+    description   TEXT        NOT NULL DEFAULT '',
+    status        TEXT        NOT NULL DEFAULT 'open'
+                              CHECK (status IN ('open', 'resolved', 'tabled')),
+    outcome       TEXT,
+    tabled_by     TEXT,
+    tabled_reason TEXT,
+    resolved_at   TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_votes_status   ON votes (status);
+  CREATE INDEX IF NOT EXISTS idx_votes_proposer ON votes (proposer);
+  CREATE INDEX IF NOT EXISTS idx_votes_created  ON votes (created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS ballots (
+    id         SERIAL      PRIMARY KEY,
+    vote_id    INTEGER     NOT NULL REFERENCES votes(id) ON DELETE CASCADE,
+    voter      TEXT        NOT NULL,
+    vote_type  TEXT        NOT NULL CHECK (vote_type IN ('positive', 'negative', 'abstain')),
+    narrative  TEXT        NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(vote_id, voter)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ballots_vote_id ON ballots (vote_id);
+  CREATE INDEX IF NOT EXISTS idx_ballots_voter   ON ballots (voter);
+
+  CREATE TABLE IF NOT EXISTS vote_comments (
+    id         SERIAL      PRIMARY KEY,
+    vote_id    INTEGER     NOT NULL REFERENCES votes(id) ON DELETE CASCADE,
+    author     TEXT        NOT NULL,
+    body       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_vote_comments_vote_id ON vote_comments (vote_id);
+`;
+
 // ─── Schema init ───────────────────────────────────────────────────────────────
 // Each section runs as an independent query so a failure in one never blocks
 // the others.  All statements are idempotent (IF NOT EXISTS / OR REPLACE).
@@ -318,6 +362,14 @@ async function init() {
       console.log('[db] ✓ graph_archive table');
     } catch (err) {
       console.error('[db] ✗ graph_archive table:', err.message);
+    }
+
+    // 7. Governance / voting tables (independent, non-fatal)
+    try {
+      await client.query(SQL_VOTES);
+      console.log('[db] ✓ governance tables (votes, ballots, vote_comments)');
+    } catch (err) {
+      console.error('[db] ✗ governance tables:', err.message);
     }
 
     console.log('[db] Schema ready.');

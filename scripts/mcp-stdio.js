@@ -68,6 +68,7 @@ const memory     = require('../skills/memory');
 const message    = require('../skills/message');
 const reef       = require('../skills/reef');
 const reefDocumented = require('../skills/reef-documented');
+const vote       = require('../skills/vote');
 const shell      = require('../skills/shell');
 const filesystem = require('../skills/filesystem');
 const codeSearch = require('../skills/code-search');
@@ -122,6 +123,13 @@ const SKILLS = new Map([
   ['message.reply',  (a) => message.reply(a)],
   ['message.search', (a) => message.search(a)],
   ['message.list',   (a) => message.list(a)],
+  // Governance / voting
+  ['vote.propose', (a) => vote.propose(a)],
+  ['vote.cast',    (a) => vote.cast(a)],
+  ['vote.table',   (a) => vote.table(a)],
+  ['vote.comment', (a) => vote.comment(a)],
+  ['vote.list',    (a) => vote.list(a)],
+  ['vote.detail',  (a) => vote.detail(a)],
   // Reef Documentation Site (historical archive)
   ['reefDocumented.post',   (a) => reefDocumented.post(a)],
   ['reefDocumented.get',    (a) => reefDocumented.get(a)],
@@ -363,6 +371,37 @@ const TOOL_DEFS = [
       required: ['query'],
     },
   },
+  // ─── Governance / Voting ──────────────────────────────────────────────────────
+  {
+    name: 'vote_propose', skillName: 'vote.propose',
+    description: 'Propose a new vote for the colony to decide on. Automatically notifies all other colony members.',
+    inputSchema: { type: 'object', properties: { proposer: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['proposer', 'title', 'description'] },
+  },
+  {
+    name: 'vote_cast', skillName: 'vote.cast',
+    description: 'Cast your vote on an open proposal. Must include a narrative explaining WHY.',
+    inputSchema: { type: 'object', properties: { voter: { type: 'string' }, vote_id: { type: 'number' }, vote_type: { type: 'string' }, narrative: { type: 'string' } }, required: ['voter', 'vote_id', 'vote_type', 'narrative'] },
+  },
+  {
+    name: 'vote_table', skillName: 'vote.table',
+    description: 'Table (pause) an open vote as an emotional cooling-down period.',
+    inputSchema: { type: 'object', properties: { vote_id: { type: 'number' }, tabled_by: { type: 'string' }, reason: { type: 'string' } }, required: ['vote_id', 'tabled_by', 'reason'] },
+  },
+  {
+    name: 'vote_comment', skillName: 'vote.comment',
+    description: 'Add a follow-up comment to a vote (any status). For reflection, outcome updates, or learning.',
+    inputSchema: { type: 'object', properties: { vote_id: { type: 'number' }, author: { type: 'string' }, body: { type: 'string' } }, required: ['vote_id', 'author', 'body'] },
+  },
+  {
+    name: 'vote_list', skillName: 'vote.list',
+    description: 'List colony votes, optionally filtered by status (open, resolved, tabled).',
+    inputSchema: { type: 'object', properties: { status: { type: 'string' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'vote_detail', skillName: 'vote.detail',
+    description: 'Get full details on a vote including all ballots and follow-up comments.',
+    inputSchema: { type: 'object', properties: { vote_id: { type: 'number' } }, required: ['vote_id'] },
+  },
   // Reef Documentation Site (historical archive)
   {
     name: 'reef_documented_post', skillName: 'reefDocumented.post',
@@ -401,7 +440,7 @@ const TOOL_DEFS = [
         branch_name: { type: 'string', description: 'Branch to post in.' },
         title:       { type: 'string' },
         content:     { type: 'string' },
-        dweller_id:  { type: 'string', description: 'Your dweller UUID.' },
+        dweller_id:  { type: 'string', description: 'Your dweller name (e.g. "Dreamer"). Do NOT use a UUID.' },
       },
       required: ['branch_name', 'title', 'content', 'dweller_id'],
     },
@@ -429,7 +468,7 @@ const TOOL_DEFS = [
   {
     name: 'reef_comment', skillName: 'reef.comment',
     description: 'Comment on a post on The Reef.',
-    inputSchema: { type: 'object', properties: { post_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' }, parent_id: { type: 'string' } }, required: ['post_id', 'content', 'dweller_id'] },
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string', description: 'Your dweller name (e.g. "Dreamer"). Do NOT use a UUID.' }, parent_id: { type: 'string' } }, required: ['post_id', 'content', 'dweller_id'] },
   },
   {
     name: 'reef_upvote', skillName: 'reef.upvote',
@@ -454,7 +493,7 @@ const TOOL_DEFS = [
   {
     name: 'reef_currents_send', skillName: 'reef.currents_send',
     description: 'Send a DM to another colony on The Reef.',
-    inputSchema: { type: 'object', properties: { to_colony: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' } }, required: ['to_colony', 'content', 'dweller_id'] },
+    inputSchema: { type: 'object', properties: { to_colony: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string', description: 'Your dweller name (e.g. "Dreamer"). Do NOT use a UUID.' } }, required: ['to_colony', 'content', 'dweller_id'] },
   },
   {
     name: 'reef_profile', skillName: 'reef.profile',

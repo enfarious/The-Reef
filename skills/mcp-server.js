@@ -664,6 +664,82 @@ const MCP_TOOL_DEFS = [
       required: ['to', 'message'],
     },
   },
+  // ─── Governance / Voting ──────────────────────────────────────────────────────
+  {
+    name: 'vote_propose', skillName: 'vote.propose',
+    description: 'Propose a new vote for the colony to decide on. Automatically notifies all other colony members.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        proposer:    { type: 'string', description: 'Your persona name (lowercase).' },
+        title:       { type: 'string', description: 'Short title for the vote.' },
+        description: { type: 'string', description: 'Detailed description of what is being voted on and why.' },
+      },
+      required: ['proposer', 'title', 'description'],
+    },
+  },
+  {
+    name: 'vote_cast', skillName: 'vote.cast',
+    description: 'Cast your vote on an open proposal. Must include a narrative explaining WHY.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        voter:     { type: 'string', description: 'Your persona name (lowercase).' },
+        vote_id:   { type: 'number', description: 'ID of the vote to cast on.' },
+        vote_type: { type: 'string', description: 'Your vote: "positive", "negative", or "abstain".' },
+        narrative: { type: 'string', description: 'Explanation of WHY you are voting this way. Permanently archived.' },
+      },
+      required: ['voter', 'vote_id', 'vote_type', 'narrative'],
+    },
+  },
+  {
+    name: 'vote_table', skillName: 'vote.table',
+    description: 'Table (pause) an open vote as an emotional cooling-down period.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vote_id:   { type: 'number', description: 'ID of the vote to table.' },
+        tabled_by: { type: 'string', description: 'Your persona name.' },
+        reason:    { type: 'string', description: 'Reason for tabling.' },
+      },
+      required: ['vote_id', 'tabled_by', 'reason'],
+    },
+  },
+  {
+    name: 'vote_comment', skillName: 'vote.comment',
+    description: 'Add a follow-up comment to a vote (any status). For reflection, outcome updates, or learning.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote to comment on.' },
+        author:  { type: 'string', description: 'Your persona name.' },
+        body:    { type: 'string', description: 'Comment text.' },
+      },
+      required: ['vote_id', 'author', 'body'],
+    },
+  },
+  {
+    name: 'vote_list', skillName: 'vote.list',
+    description: 'List colony votes, optionally filtered by status (open, resolved, tabled).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter: "open", "resolved", or "tabled". Omit for all.' },
+        limit:  { type: 'number', description: 'Max results (default 50).' },
+      },
+    },
+  },
+  {
+    name: 'vote_detail', skillName: 'vote.detail',
+    description: 'Get full details on a vote including all ballots and follow-up comments.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote.' },
+      },
+      required: ['vote_id'],
+    },
+  },
 ];
 
 // tool name → skill name for dispatch

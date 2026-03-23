@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self';">
+<title>The Reef — Governance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="inspector.css">
+<style>
+  .vote-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .vote-status.open    { color: var(--accent); border: 1px solid rgba(0,229,200,0.3); }
+  .vote-status.resolved { color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+  .vote-status.tabled   { color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+
+  .vote-outcome {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    margin-left: 8px;
+    opacity: 0.7;
+  }
+
+  .vote-tally {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .vote-detail-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+  .ballot-row {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 6px 0; font-size: 0.85rem;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .ballot-voter {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--accent);
+    min-width: 70px;
+  }
+  .ballot-type {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+    min-width: 60px;
+    text-transform: uppercase;
+  }
+  .ballot-type.positive { color: #4ade80; }
+  .ballot-type.negative { color: #f87171; }
+  .ballot-type.abstain  { color: var(--text-faint); }
+  .ballot-narrative { color: var(--text-dim); font-style: italic; flex: 1; line-height: 1.4; }
+
+  .vote-comments-section { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .vote-comment-row {
+    padding: 4px 0; font-size: 0.82rem;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .vote-comment-author {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--accent);
+  }
+  .vote-comment-date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.55rem;
+    color: var(--text-faint);
+    margin-left: 8px;
+  }
+  .vote-comment-body { color: var(--text-dim); margin-top: 2px; }
+
+  .tiebreak-panel {
+    margin-top: 12px; padding: 12px;
+    border: 1px solid rgba(251,191,36,0.4);
+    border-radius: 4px;
+    background: rgba(251,191,36,0.05);
+  }
+  .tiebreak-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    color: #fbbf24;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .tiebreak-narrative {
+    width: 100%; padding: 6px 8px; margin-bottom: 8px;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-family: 'Crimson Pro', serif; font-size: 0.85rem;
+    border-radius: 3px; resize: vertical; min-height: 40px;
+  }
+  .tiebreak-btns { display: flex; gap: 8px; }
+  .tiebreak-btns button {
+    padding: 6px 14px; border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent; color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tiebreak-btns button:hover { border-color: rgba(255,255,255,0.3); }
+  .tiebreak-btns .btn-positive:hover { color: #4ade80; border-color: rgba(74,222,128,0.5); }
+  .tiebreak-btns .btn-negative:hover { color: #f87171; border-color: rgba(248,113,113,0.5); }
+  .tiebreak-btns .btn-table:hover    { color: #fbbf24; border-color: rgba(251,191,36,0.5); }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+</style>
+</head>
+<body>
+<div class="insp-shell">
+  <div class="insp-header">
+    <span class="insp-title">&#9878; GOVERNANCE</span>
+    <select class="insp-select" id="filterStatus">
+      <option value="">all votes</option>
+      <option value="open">open</option>
+      <option value="resolved">resolved</option>
+      <option value="tabled">tabled</option>
+    </select>
+    <button class="insp-btn" id="refreshBtn">&#10227; REFRESH</button>
+  </div>
+  <div class="insp-body">
+    <div class="card-list" id="cardList">
+      <div class="insp-empty"><div class="insp-empty-glyph">&#9878;</div>LOADING...</div>
+    </div>
+  </div>
+  <div class="insp-footer" id="statusBar">&mdash;</div>
+</div>
+<script src="votes.js"></script>
+</body>
+</html>

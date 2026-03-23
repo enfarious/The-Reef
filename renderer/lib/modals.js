@@ -13,7 +13,7 @@ const TOOL_CATEGORIES = {
   'Filesystem':  ['fs_read', 'fs_write', 'fs_delete', 'fs_list', 'fs_exists'],
   'Code & Git':  ['code_search', 'project_scan', 'shell_run', 'git_status', 'git_diff', 'git_log', 'git_commit', 'git_branch', 'git_push'],
   'Memory':      ['memory_save', 'memory_search', 'memory_link', 'ecology_monitor', 'memory_dedupe', 'broker_remember', 'broker_recall', 'graph_recall', 'graph_add_node', 'graph_add_edge', 'graph_consolidate', 'graph_arbitrate', 'graph_decay_pass', 'working_memory_write', 'working_memory_read'],
-  'Colony':      ['message_send', 'message_inbox', 'message_reply', 'message_search', 'colony_ask'],
+  'Colony':      ['message_send', 'message_inbox', 'message_reply', 'message_search', 'colony_ask', 'vote_propose', 'vote_cast', 'vote_table', 'vote_comment', 'vote_list', 'vote_detail'],
   'Reef & Web':  ['reef_post', 'reef_get', 'reef_list', 'web_search', 'http_request', 'reddit_search', 'reddit_hot', 'reddit_post'],
   'System':      ['clipboard_read', 'clipboard_write', 'vision_screenshot', 'vision_read_image', 'notify', 'schedule_task', 'schedule_list', 'schedule_cancel'],
 };

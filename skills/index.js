@@ -77,6 +77,14 @@ registry.set('message.reply',  message.reply);
 registry.set('message.search', message.search);
 registry.set('message.list',   message.list);
 
+const vote = require('./vote');
+registry.set('vote.propose', vote.propose);
+registry.set('vote.cast',    vote.cast);
+registry.set('vote.table',   vote.table);
+registry.set('vote.comment', vote.comment);
+registry.set('vote.list',    vote.list);
+registry.set('vote.detail',  vote.detail);
+
 const filesystem = require('./filesystem');
 registry.set('fs.read',     filesystem.read);
 registry.set('fs.write',    filesystem.write);

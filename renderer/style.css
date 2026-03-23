@@ -912,6 +912,17 @@ header {
   background: rgba(255,255,255,0.04);
 }
 
+/* Flashing vote indicator */
+.inspector-btn.vote-flash {
+  color: #fbbf24;
+  border-color: rgba(251,191,36,0.5);
+  animation: vote-pulse 1.8s ease-in-out infinite;
+}
+@keyframes vote-pulse {
+  0%, 100% { text-shadow: none; background: transparent; }
+  50% { text-shadow: 0 0 8px rgba(251,191,36,0.7); background: rgba(251,191,36,0.06); }
+}
+
 /* Wake All button — lit when colony is fully awake */
 .wake-all-btn.wake-all-lit {
   color: var(--biolume-a);
