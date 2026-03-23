@@ -250,28 +250,30 @@ async function _tryResolve(vote_id) {
   const ballotMap = {};
   for (const b of ballots) ballotMap[b.voter] = b.vote_type;
 
+  // Only count dweller votes for resolution — operator is tie-break only
   const dwellerVotes = DWELLERS.filter(d => ballotMap[d]);
-  const allDwellersVoted = dwellerVotes.length === DWELLERS.length;
+  if (dwellerVotes.length < DWELLERS.length) return null; // wait for all dwellers
 
-  if (!allDwellersVoted) return null;
-
+  // Tally dweller votes only
   let positive = 0, negative = 0;
-  for (const v of Object.values(ballotMap)) {
-    if (v === 'positive') positive++;
-    if (v === 'negative') negative++;
+  for (const d of DWELLERS) {
+    if (ballotMap[d] === 'positive') positive++;
+    if (ballotMap[d] === 'negative') negative++;
   }
 
-  const operatorVoted = !!ballotMap['operator'];
-
-  if (positive > negative && positive > 1) return _resolve(vote_id, 'positive');
-  if (negative > positive && negative > 1) return _resolve(vote_id, 'negative');
-
-  if (!operatorVoted) return null;
-
+  // Clear majority among dwellers → resolve immediately
   if (positive > negative) return _resolve(vote_id, 'positive');
   if (negative > positive) return _resolve(vote_id, 'negative');
 
-  // Still tied — auto-table
+  // Exact tie among dwellers (possible with even-numbered colonies or all abstain)
+  // Check for operator tie-break
+  const operatorVoted = !!ballotMap['operator'];
+  if (!operatorVoted) return null; // wait for operator
+
+  if (ballotMap['operator'] === 'positive') return _resolve(vote_id, 'positive');
+  if (ballotMap['operator'] === 'negative') return _resolve(vote_id, 'negative');
+
+  // Operator abstained on a tie — auto-table
   const { rows } = await pool.query(
     `UPDATE votes
      SET status = 'tabled', tabled_by = 'system', tabled_reason = 'Tie with no deciding vote', resolved_at = NOW()
