@@ -667,29 +667,31 @@ const MCP_TOOL_DEFS = [
   // ─── Governance / Voting ──────────────────────────────────────────────────────
   {
     name: 'vote_propose', skillName: 'vote.propose',
-    description: 'Propose a new vote for the colony to decide on. Automatically notifies all other colony members.',
+    description: 'Propose a new vote. For ranked choice, provide an options array with 2+ choices.',
     inputSchema: {
       type: 'object',
       properties: {
         proposer:    { type: 'string', description: 'Your persona name (lowercase).' },
         title:       { type: 'string', description: 'Short title for the vote.' },
         description: { type: 'string', description: 'Detailed description of what is being voted on and why.' },
+        options:     { type: 'array', items: { type: 'string' }, description: 'For ranked choice: 2+ options. Omit for standard yes/no.' },
       },
       required: ['proposer', 'title', 'description'],
     },
   },
   {
     name: 'vote_cast', skillName: 'vote.cast',
-    description: 'Cast your vote on an open proposal. Must include a narrative explaining WHY.',
+    description: 'Cast your vote. Standard: use vote_type. Ranked choice: use ranking array (most to least preferred). Must include narrative.',
     inputSchema: {
       type: 'object',
       properties: {
         voter:     { type: 'string', description: 'Your persona name (lowercase).' },
         vote_id:   { type: 'number', description: 'ID of the vote to cast on.' },
-        vote_type: { type: 'string', description: 'Your vote: "positive", "negative", or "abstain".' },
-        narrative: { type: 'string', description: 'Explanation of WHY you are voting this way. Permanently archived.' },
+        vote_type: { type: 'string', description: 'For standard: "positive", "negative", or "abstain".' },
+        ranking:   { type: 'array', items: { type: 'string' }, description: 'For ranked choice: options ordered most to least preferred.' },
+        narrative: { type: 'string', description: 'Explanation of WHY. Permanently archived.' },
       },
-      required: ['voter', 'vote_id', 'vote_type', 'narrative'],
+      required: ['voter', 'vote_id', 'narrative'],
     },
   },
   {

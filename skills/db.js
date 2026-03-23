@@ -258,6 +258,7 @@ const SQL_VOTES = `
     proposer      TEXT        NOT NULL,
     title         TEXT        NOT NULL,
     description   TEXT        NOT NULL DEFAULT '',
+    options       JSONB,
     status        TEXT        NOT NULL DEFAULT 'open'
                               CHECK (status IN ('open', 'resolved', 'tabled')),
     outcome       TEXT,
@@ -275,7 +276,8 @@ const SQL_VOTES = `
     id         SERIAL      PRIMARY KEY,
     vote_id    INTEGER     NOT NULL REFERENCES votes(id) ON DELETE CASCADE,
     voter      TEXT        NOT NULL,
-    vote_type  TEXT        NOT NULL CHECK (vote_type IN ('positive', 'negative', 'abstain')),
+    vote_type  TEXT        NOT NULL CHECK (vote_type IN ('positive', 'negative', 'abstain', 'ranked')),
+    ranking    JSONB,
     narrative  TEXT        NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(vote_id, voter)
@@ -371,6 +373,15 @@ async function init() {
     } catch (err) {
       console.error('[db] ✗ governance tables:', err.message);
     }
+
+    // 7b. Migration: add ranked choice columns if missing (existing DBs)
+    try {
+      await client.query(`ALTER TABLE votes ADD COLUMN IF NOT EXISTS options JSONB`);
+      await client.query(`ALTER TABLE ballots ADD COLUMN IF NOT EXISTS ranking JSONB`);
+      // Relax CHECK constraint to allow 'ranked' vote_type
+      await client.query(`ALTER TABLE ballots DROP CONSTRAINT IF EXISTS ballots_vote_type_check`);
+      await client.query(`ALTER TABLE ballots ADD CONSTRAINT ballots_vote_type_check CHECK (vote_type IN ('positive', 'negative', 'abstain', 'ranked'))`);
+    } catch { /* non-fatal */ }
 
     console.log('[db] Schema ready.');
   } finally {

@@ -374,13 +374,13 @@ const TOOL_DEFS = [
   // ─── Governance / Voting ──────────────────────────────────────────────────────
   {
     name: 'vote_propose', skillName: 'vote.propose',
-    description: 'Propose a new vote for the colony to decide on. Automatically notifies all other colony members.',
-    inputSchema: { type: 'object', properties: { proposer: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['proposer', 'title', 'description'] },
+    description: 'Propose a new vote. For ranked choice, provide an options array with 2+ choices.',
+    inputSchema: { type: 'object', properties: { proposer: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, description: 'For ranked choice: 2+ options. Omit for yes/no.' } }, required: ['proposer', 'title', 'description'] },
   },
   {
     name: 'vote_cast', skillName: 'vote.cast',
-    description: 'Cast your vote on an open proposal. Must include a narrative explaining WHY.',
-    inputSchema: { type: 'object', properties: { voter: { type: 'string' }, vote_id: { type: 'number' }, vote_type: { type: 'string' }, narrative: { type: 'string' } }, required: ['voter', 'vote_id', 'vote_type', 'narrative'] },
+    description: 'Cast your vote. Standard: use vote_type. Ranked choice: use ranking array (most to least preferred). Must include narrative.',
+    inputSchema: { type: 'object', properties: { voter: { type: 'string' }, vote_id: { type: 'number' }, vote_type: { type: 'string' }, ranking: { type: 'array', items: { type: 'string' } }, narrative: { type: 'string' } }, required: ['voter', 'vote_id', 'narrative'] },
   },
   {
     name: 'vote_table', skillName: 'vote.table',

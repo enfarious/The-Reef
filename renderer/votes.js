@@ -44,21 +44,31 @@ function renderCards(votes) {
     const pos = parseInt(v.positive_count) || 0;
     const neg = parseInt(v.negative_count) || 0;
     const abs = parseInt(v.abstain_count) || 0;
+    const ranked = parseInt(v.ranked_count) || 0;
     const total = parseInt(v.ballot_count) || 0;
     const comments = parseInt(v.comment_count) || 0;
+    const isRanked = !!v.options;
 
-    return `<div class="card" data-id="${v.id}">
+    let tallyText;
+    if (isRanked) {
+      const opts = JSON.parse(v.options);
+      tallyText = `${total}/4 ranked \u2014 ${opts.length} options${comments ? ` \u00b7 ${comments} comment${comments > 1 ? 's' : ''}` : ''}`;
+    } else {
+      tallyText = `${total}/4 cast \u2014 ${pos} positive, ${neg} negative, ${abs} abstain${comments ? ` \u00b7 ${comments} comment${comments > 1 ? 's' : ''}` : ''}`;
+    }
+
+    return `<div class="card" data-id="${v.id}" data-ranked="${isRanked}">
       <div class="card-meta">
         <span class="card-persona">${esc(v.proposer)}</span>
         ${statusBadge(v.status)}
+        ${isRanked ? '<span class="vote-status" style="color:#c084fc;border-color:rgba(192,132,252,0.3);">RANKED</span>' : ''}
         ${v.outcome ? `<span class="vote-outcome">${esc(v.outcome)}</span>` : ''}
         <span class="card-date">${fmtDate(v.created_at)}</span>
       </div>
       <div class="card-title">${esc(v.title)}</div>
       <div class="card-body">${esc(v.description)}</div>
-      <div class="vote-tally">
-        ${total}/4 cast \u2014 ${pos} positive, ${neg} negative, ${abs} abstain${comments ? ` \u00b7 ${comments} comment${comments > 1 ? 's' : ''}` : ''}
-      </div>
+      ${isRanked ? `<div class="vote-tally" style="margin-top:4px;">${JSON.parse(v.options).map((o, i) => `<span style="opacity:0.6;">${i + 1}.</span> ${esc(o)}`).join(' \u00b7 ')}</div>` : ''}
+      <div class="vote-tally">${tallyText}</div>
       <div class="vote-detail-container"></div>
     </div>`;
   }).join('');
@@ -101,17 +111,46 @@ function renderDetail(container, data) {
 
   let html = '';
 
+  const isRanked = !!vote.options;
+
   // Ballots section
   if (ballots.length) {
     html += `<div class="vote-detail-section">
       <div class="section-label">BALLOTS</div>
-      ${ballots.map(b => `
-        <div class="ballot-row">
+      ${ballots.map(b => {
+        if (b.vote_type === 'ranked' && b.ranking) {
+          const ranking = typeof b.ranking === 'string' ? JSON.parse(b.ranking) : b.ranking;
+          return `<div class="ballot-row" style="flex-direction:column;gap:4px;">
+            <div style="display:flex;gap:10px;align-items:baseline;">
+              <span class="ballot-voter">${esc(b.voter)}</span>
+              <span class="ballot-type" style="color:#c084fc;">RANKED</span>
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;color:var(--text-dim);padding-left:80px;">
+              ${ranking.map((r, i) => `${i + 1}. ${esc(r)}`).join(' \u2192 ')}
+            </div>
+            <div class="ballot-narrative" style="padding-left:80px;">${esc(b.narrative)}</div>
+          </div>`;
+        }
+        return `<div class="ballot-row">
           <span class="ballot-voter">${esc(b.voter)}</span>
           <span class="ballot-type ${esc(b.vote_type)}">${voteIcon(b.vote_type)} ${esc(b.vote_type)}</span>
           <span class="ballot-narrative">${esc(b.narrative)}</span>
-        </div>
-      `).join('')}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // Elimination rounds (ranked choice, resolved)
+  if (data.rounds && data.rounds.length) {
+    html += `<div class="vote-detail-section">
+      <div class="section-label">ELIMINATION ROUNDS</div>
+      ${data.rounds.map((r, i) => {
+        const tallyStr = Object.entries(r.tally).map(([opt, count]) => `${esc(opt)}: ${count}`).join(', ');
+        let line = `<div style="font-size:0.75rem;color:var(--text-dim);padding:3px 0;">Round ${i + 1}: ${tallyStr}`;
+        if (r.eliminated) line += ` \u2014 <span style="color:#f87171;">eliminated: ${esc(r.eliminated)}</span>`;
+        if (r.winner) line += ` \u2014 <span style="color:#4ade80;">winner: ${esc(r.winner)}</span>`;
+        return line + '</div>';
+      }).join('')}
     </div>`;
   }
 

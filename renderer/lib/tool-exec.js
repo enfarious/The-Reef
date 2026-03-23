@@ -77,6 +77,18 @@ export async function executeTool(callerPersonaId, toolCall) {
   } else if (skillName === 'working_memory.write') {
     // Auto-tag dream fragments with the producing persona so receivers can filter out their own
     invokeArgs = { ...input, leftBy: callerPersonaId };
+  } else if (skillName.startsWith('vote.')) {
+    // Inject caller identity — agents should not self-report voter/proposer/author names
+    const entityName = (state.config[callerPersonaId]?.name || callerPersonaId).toLowerCase();
+    if (skillName === 'vote.propose') {
+      invokeArgs = { ...input, proposer: entityName };
+    } else if (skillName === 'vote.cast') {
+      invokeArgs = { ...input, voter: entityName };
+    } else if (skillName === 'vote.comment') {
+      invokeArgs = { ...input, author: entityName };
+    } else if (skillName === 'vote.table') {
+      invokeArgs = { ...input, tabled_by: entityName };
+    }
   }
 
   const result = await window.reef.invoke(skillName, invokeArgs);

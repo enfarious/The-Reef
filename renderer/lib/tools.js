@@ -523,29 +523,31 @@ export const TOOL_DEFS = [
   // ─── Governance / Voting ──────────────────────────────────────────────────────
   {
     name: 'vote_propose', skillName: 'vote.propose',
-    description: 'Propose a new vote for the colony to decide on. A message is automatically sent to all other colony members notifying them to cast their vote.',
+    description: 'Propose a new vote for the colony to decide on. A message is automatically sent to all other colony members notifying them to cast their vote. For ranked choice, provide an options array with 2+ choices.',
     input_schema: {
       type: 'object',
       properties: {
         proposer:    { type: 'string', description: 'Your persona name (lowercase).' },
         title:       { type: 'string', description: 'Short title for the vote.' },
         description: { type: 'string', description: 'Detailed description of what is being voted on and why.' },
+        options:     { type: 'array', items: { type: 'string' }, description: 'For ranked choice: array of 2+ options to rank. Omit for standard yes/no voting.' },
       },
       required: ['proposer', 'title', 'description'],
     },
   },
   {
     name: 'vote_cast', skillName: 'vote.cast',
-    description: 'Cast your vote on an open proposal. You must include a narrative explaining WHY you voted this way — votes without reasoning are not accepted.',
+    description: 'Cast your vote on an open proposal. For standard votes use vote_type (positive/negative/abstain). For ranked choice use ranking (array of options from most to least preferred). You must include a narrative explaining WHY.',
     input_schema: {
       type: 'object',
       properties: {
         voter:     { type: 'string', description: 'Your persona name (lowercase).' },
         vote_id:   { type: 'number', description: 'ID of the vote to cast on.' },
-        vote_type: { type: 'string', description: 'Your vote: "positive", "negative", or "abstain".' },
+        vote_type: { type: 'string', description: 'For standard votes: "positive", "negative", or "abstain".' },
+        ranking:   { type: 'array', items: { type: 'string' }, description: 'For ranked choice: array of options ordered from most to least preferred.' },
         narrative: { type: 'string', description: 'Explanation of WHY you are voting this way. This is permanently archived.' },
       },
-      required: ['voter', 'vote_id', 'vote_type', 'narrative'],
+      required: ['voter', 'vote_id', 'narrative'],
     },
   },
   {
