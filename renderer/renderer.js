@@ -16,7 +16,7 @@ import {
   COMPACT_PROMPT, updateContextCounter, buildOperatorSection,
   buildWorkspaceSection, buildSessionSection, scanProject, updateCwdDisplay, personaHasApiAccess,
 } from './lib/context.js';
-import { setHeartbeatCallbacks, runHeartbeatFor, startHeartbeat, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
+import { setHeartbeatCallbacks, runHeartbeatFor, runSingleCurrentCycle, startHeartbeat, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
 import { parseAtMentions }                                     from './lib/mentions.js';
 import { TOOL_DEFS, contextualToolDefs, detectModeClient }     from './lib/tools.js';
 import {
@@ -117,8 +117,9 @@ async function compactPersona(id) {
 
 // ─── Tool-use loop — main orchestrator ───────────────────────────────────────
 
-async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null } = {}) {
-  if (state.thinking[id]) return;
+async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null, returnOutput = false } = {}) {
+  if (state.thinking[id]) return returnOutput ? '' : undefined;
+  let _accumulatedOutput = '';
 
   const endpointEl = document.getElementById(`endpoint-${id}`);
   let   endpoint   = endpointEl.value.trim();
@@ -179,6 +180,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       setThinking(id, false);
       if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
+      if (returnOutput) return _accumulatedOutput.trim();
       return;
     }
 
@@ -206,6 +208,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       }
 
       if (text?.trim()) {
+        if (returnOutput) _accumulatedOutput += text;
         const msgId = uid();
         let aDiv;
         if (result._bubble) {
@@ -225,6 +228,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       setThinking(id, false);
       if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
+      if (returnOutput) return _accumulatedOutput.trim();
       return;
     }
 
@@ -232,6 +236,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
     if (result._bubble) {
       adoptBubbleAsAccumulator(id, result._bubble);
     } else if (text?.trim()) {
+      if (returnOutput) _accumulatedOutput += text;
       appendToolTextMsg(id, text);
     }
 
@@ -874,7 +879,12 @@ document.addEventListener('click', e => {
   }
 
   if (e.target.matches('[data-persona-pulse]')) {
-    runHeartbeatFor(e.target.dataset.personaPulse, { manual: true });
+    const mode = state.config.settings.dreamMode || 'shared-streams';
+    if (mode === 'single-current') {
+      runSingleCurrentCycle();  // any heartbeat button triggers full A→B→C cycle
+    } else {
+      runHeartbeatFor(e.target.dataset.personaPulse, { manual: true });
+    }
   }
 
   if (e.target.matches('[data-persona-fold]')) {
@@ -932,10 +942,8 @@ window.reef.onConfigUpdated(cfg => {
   if (cfg.settings.fontScale  !== undefined) applyFontScale(cfg.settings.fontScale);
   if (cfg.settings.fontColors !== undefined) applyTextColors(cfg.settings.fontColors);
   applyColonyName(state.config.settings.colonyName);
-  if (cfg.settings.heartbeatInterval !== undefined &&
-      cfg.settings.heartbeatInterval !== prev) {
-    startHeartbeat();
-  }
+  // Restart heartbeat on any settings change (handles interval + dream mode changes)
+  startHeartbeat();
   if (cfg.settings.cwd !== undefined) {
     const newCwd = cfg.settings.cwd || null;
     if (newCwd !== state.cwd) {
@@ -1084,6 +1092,7 @@ async function init() {
   document.getElementById('openReefNetwork').onclick   = () => window.reef.openWindow('reef-network');
   document.getElementById('openArchive').onclick       = () => window.reef.openWindow('archive');
   document.getElementById('openVotes').onclick         = () => window.reef.openWindow('votes');
+  document.getElementById('openDreams').onclick        = () => window.reef.openWindow('dreams');
   document.getElementById('openVisualizer').onclick    = () => window.reef.openWindow('visualizer');
 
   // ─── Governance pulse check ───────────────────────────────────────────────────

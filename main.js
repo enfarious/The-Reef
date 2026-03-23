@@ -410,6 +410,7 @@ ipcMain.handle('window:open', (_event, type) => {
     'messages':       { width:  960, height: 700, title: 'THE REEF — COLONY MESSAGES' },
     'archive':        { width:  960, height: 650, title: 'THE REEF — ARCHIVE'         },
     'votes':          { width:  960, height: 700, title: 'THE REEF — GOVERNANCE'     },
+    'dreams':         { width: 1100, height: 750, title: 'THE REEF — DREAMS'        },
     'reef-network':   { width: 1100, height: 800, title: 'THE REEF — SOCIAL NETWORK'  },
     'settings':       { width:  820, height: 640, title: 'THE REEF — SETTINGS'        },
     'visualizer':     { width: 1280, height: 820, title: 'THE REEF — MEMORY GRAPH'    },

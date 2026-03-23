@@ -297,6 +297,23 @@ const SQL_VOTES = `
   CREATE INDEX IF NOT EXISTS idx_vote_comments_vote_id ON vote_comments (vote_id);
 `;
 
+// ── 8. Dream pipeline stages ─────────────────────────────────────────────────
+const SQL_DREAM_STAGES = `
+  CREATE TABLE IF NOT EXISTS dream_stages (
+    id         SERIAL      PRIMARY KEY,
+    dream_id   TEXT        NOT NULL,
+    coil       INTEGER     NOT NULL CHECK (coil IN (1, 2)),
+    stage      TEXT        NOT NULL CHECK (stage IN ('A', 'B', 'C')),
+    persona_id TEXT        NOT NULL,
+    input      TEXT,
+    output     TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_dream_stages_dream_id ON dream_stages(dream_id);
+  CREATE INDEX IF NOT EXISTS idx_dream_stages_created  ON dream_stages(created_at DESC);
+`;
+
 // ─── Schema init ───────────────────────────────────────────────────────────────
 // Each section runs as an independent query so a failure in one never blocks
 // the others.  All statements are idempotent (IF NOT EXISTS / OR REPLACE).
@@ -382,6 +399,14 @@ async function init() {
       await client.query(`ALTER TABLE ballots DROP CONSTRAINT IF EXISTS ballots_vote_type_check`);
       await client.query(`ALTER TABLE ballots ADD CONSTRAINT ballots_vote_type_check CHECK (vote_type IN ('positive', 'negative', 'abstain', 'ranked'))`);
     } catch { /* non-fatal */ }
+
+    // 8. Dream pipeline stages (independent, non-fatal)
+    try {
+      await client.query(SQL_DREAM_STAGES);
+      console.log('[db] ✓ dream_stages table');
+    } catch (err) {
+      console.error('[db] ✗ dream_stages table:', err.message);
+    }
 
     console.log('[db] Schema ready.');
   } finally {

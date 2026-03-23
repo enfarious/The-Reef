@@ -92,6 +92,21 @@
       <h2 class="sw-section-title">HEARTBEAT</h2>
 
       <div class="sw-field">
+        <label class="sw-label">DREAM MODE</label>
+        <div style="display:flex;gap:16px;align-items:center;">
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
+            <input type="radio" name="sDreamMode" value="shared-streams" checked>
+            <span>Shared Streams</span>
+          </label>
+          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
+            <input type="radio" name="sDreamMode" value="single-current">
+            <span>Single Current</span>
+          </label>
+        </div>
+        <div class="sw-hint">Shared Streams: independent rotation, dreams shared freely. Single Current: pipeline (A catches &rarr; B molds &rarr; C catalogs), 2 coils per dream, 6 touches total.</div>
+      </div>
+
+      <div class="sw-field">
         <label class="sw-label">HEARTBEAT INTERVAL</label>
         <div class="sw-row-inline">
           <input class="sw-input sw-input-num" id="sHeartbeatInterval"

@@ -109,6 +109,7 @@ function buildSettings() {
     operatorName:      val('sOperatorName'),
     operatorBirthdate: val('sOperatorBirthdate'),
     operatorAbout:     val('sOperatorAbout'),
+    dreamMode:         document.querySelector('input[name="sDreamMode"]:checked')?.value || 'shared-streams',
     heartbeatInterval: Math.max(5, parseInt(val('sHeartbeatInterval'), 10) || 60),
     contextWindow:     Math.max(512, parseInt(val('sContextWindow'),   10) || 4096),
     maxToolSteps:      Math.min(20, Math.max(1, parseInt(val('sMaxToolSteps'),   10) || 5)),
@@ -142,6 +143,8 @@ function populate(cfg) {
   const s = cfg.settings || {};
   set('sColonyName',        s.colonyName        || '');
   set('sBasePrompt',        s.baseSystemPrompt  || '');
+  const dreamModeRadio = document.querySelector(`input[name="sDreamMode"][value="${s.dreamMode || 'shared-streams'}"]`);
+  if (dreamModeRadio) dreamModeRadio.checked = true;
   set('sHeartbeatInterval', s.heartbeatInterval || 60);
   set('sContextWindow',     s.contextWindow     || 4096);
   set('sMaxToolSteps',      s.maxToolSteps      ?? 5);
@@ -350,6 +353,11 @@ function flash(el) {
 
 ['sDefaultDreamProducer', 'sDefaultDreamReceiver'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', scheduleSave);
+});
+
+// Dream mode radio buttons
+document.querySelectorAll('input[name="sDreamMode"]').forEach(radio => {
+  radio.addEventListener('change', scheduleSave);
 });
 
 document.getElementById('sHeartbeatInterval').addEventListener('change', e => {

@@ -85,6 +85,14 @@ registry.set('vote.comment', vote.comment);
 registry.set('vote.list',    vote.list);
 registry.set('vote.detail',  vote.detail);
 
+const dream = require('./dream');
+registry.set('dream.create',                dream.createDream);
+registry.set('dream.writeStage',            dream.writeStage);
+registry.set('dream.latestCompletedOutput', dream.latestCompletedOutput);
+registry.set('dream.previousCoilOutput',    dream.previousCoilOutput);
+registry.set('dream.list',                  dream.listDreams);
+registry.set('dream.detail',               dream.dreamDetail);
+
 const filesystem = require('./filesystem');
 registry.set('fs.read',     filesystem.read);
 registry.set('fs.write',    filesystem.write);
