@@ -84,9 +84,12 @@ function httpStream(url, headers, body, { onEvent, onEnd, onError }) {
       res.on('end', () => {
         try {
           const j = JSON.parse(errBody);
-          onError(new Error(j.error?.message || j.message || `HTTP ${res.statusCode}`));
+          const detail = j.error?.metadata?.raw || j.error?.message || j.message || `HTTP ${res.statusCode}`;
+          console.error(`[llm:http] ${res.statusCode} error:`, JSON.stringify(j, null, 2));
+          onError(new Error(detail));
         } catch {
-          onError(new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 200)}`));
+          console.error(`[llm:http] ${res.statusCode} raw:`, errBody.slice(0, 500));
+          onError(new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 300)}`));
         }
       });
       return;
