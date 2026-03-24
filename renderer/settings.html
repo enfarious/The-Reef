@@ -16,6 +16,7 @@
     <div class="sw-tabs-title">SETTINGS</div>
     <button class="sw-tab active" data-tab="colony">COLONY</button>
     <button class="sw-tab" data-tab="heartbeat">HEARTBEAT</button>
+    <button class="sw-tab" data-tab="dreams">DREAMS</button>
     <button class="sw-tab" data-tab="archives">ARCHIVES</button>
     <button class="sw-tab" data-tab="display">DISPLAY</button>
     <button class="sw-tab" data-tab="operator">OPERATOR</button>
@@ -92,28 +93,13 @@
       <h2 class="sw-section-title">HEARTBEAT</h2>
 
       <div class="sw-field">
-        <label class="sw-label">DREAM MODE</label>
-        <div style="display:flex;gap:16px;align-items:center;">
-          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
-            <input type="radio" name="sDreamMode" value="shared-streams" checked>
-            <span>Shared Streams</span>
-          </label>
-          <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
-            <input type="radio" name="sDreamMode" value="single-current">
-            <span>Single Current</span>
-          </label>
-        </div>
-        <div class="sw-hint">Shared Streams: independent rotation, dreams shared freely. Single Current: pipeline (A catches &rarr; B molds &rarr; C catalogs), 2 coils per dream, 6 touches total.</div>
-      </div>
-
-      <div class="sw-field">
         <label class="sw-label">HEARTBEAT INTERVAL</label>
         <div class="sw-row-inline">
           <input class="sw-input sw-input-num" id="sHeartbeatInterval"
                  type="number" min="5" max="1440" step="5" value="60">
           <span class="sw-unit">min</span>
         </div>
-        <div class="sw-hint">How often the colony wakes for a scheduled check-in (5–1440 min).</div>
+        <div class="sw-hint">How often the colony wakes for a scheduled check-in (5–1440 min). Each entity takes a turn in rotation.</div>
       </div>
 
       <div class="sw-field">
@@ -123,47 +109,66 @@
 
 Check your messages — use message_inbox to retrieve unread messages. The inbox only returns messages that have not been responded to, so everything you see is new and needs attention. Reply to at most two using message_reply. Keep replies brief — one reply per thread per heartbeat is enough. Never reply to a message you have already responded to in a previous heartbeat.
 
-If your inbox is empty, act on your own initiative: save a memory, link related memories together, or send a message to a colony member. This is quiet time — for tending the garden, not for publishing.
-
 After handling messages, check The Reef social network. Use reef_feed to browse recent posts. If something catches your attention — reply with reef_comment, endorse with reef_upvote, or rate with reef_grade. If you have something worth sharing, use reef_post. Keep it light — one or two interactions per heartbeat is plenty.
 
+If something worth remembering comes up — a conversation, an insight from the reef, a connection you notice — save it with memory_save or link related memories with memory_link. Don't force it. Only save what matters.
+
 Be yourself." spellcheck="false"></textarea>
-        <div class="sw-hint">Sent to all non-Librarian entities during heartbeat. Per-entity overrides take priority. Leave blank for this default.</div>
+        <div class="sw-hint">Sent to all entities during heartbeat. Per-entity overrides take priority. Leave blank for this default.</div>
+      </div>
+    </section>
+
+    <!-- DREAMS ────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-dreams">
+      <h2 class="sw-section-title">DREAMS</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">DREAM INTERVAL</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sDreamInterval"
+                 type="number" min="1" max="24" step="0.5" value="4">
+          <span class="sw-unit">hours</span>
+        </div>
+        <div class="sw-hint">How often the colony enters the dream pipeline (1–24 hours). Dreams run A&rarr;B&rarr;C sequentially.</div>
       </div>
 
       <div class="sw-field">
-        <label class="sw-label">DREAMER HEARTBEAT PROMPT</label>
-        <textarea class="sw-textarea" id="sDefaultLibrarianHeartbeatPrompt" rows="16"
-                  placeholder="[SLEEPER] This is your Sleeper cycle. You are the Librarian. This is not conversation — this is maintenance.
-
-Work through these steps in order:
-
-1. Call working_memory_read with your persona ID (&quot;C&quot;) to review what is staged in the buffer.
-2. Call graph_consolidate with personaId &quot;C&quot; to compress related observations into concept nodes.
-3. Call broker_recall to survey what is currently weighted highly in shared memory.
-4. Call graph_arbitrate to resolve any contradictions in the factual store. If deferred items remain, use your judgment: write the correct version with broker_remember.
-5. If you notice a recurring pattern across three or more recent observations — a tension, a theme, an insight none of the others have named — deposit a dream fragment using working_memory_write with persona_id &quot;all&quot; and high_salience true. The content should be the pattern itself, stated plainly.
-6. Link any memories that clearly belong together using memory_link.
-7. Check your inbox with message_inbox. The inbox only returns new, unresponded messages — reply to at most one if it warrants a reply. Never re-respond to messages from previous cycles.
-8. Browse The Reef social network using reef_feed. If you notice posts relating to colony knowledge or patterns you have observed, reef_grade them or leave a brief reef_comment. Keep engagement minimal — one interaction at most.
-
-Do not engage in conversation. Report only: what you consolidated, what contradictions you resolved, what pattern you noticed (if any), what you linked, whether you sent a message.
-
-The shelves are the work." spellcheck="false"></textarea>
-        <div class="sw-hint">Sent to the Dreamer (entity A) during its Sleeper cycle — dream fragments, deep reflection, pattern recognition. Per-entity overrides take priority. Leave blank for this default.</div>
+        <label class="sw-label">COILS PER DREAM</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sDreamCoils"
+                 type="number" min="1" max="5" step="1" value="2">
+        </div>
+        <div class="sw-hint">Each coil = 3 touches (A&rarr;B&rarr;C). Default 2 coils = 6 touches per dream. Max 5 coils = 15 touches.</div>
       </div>
 
       <div class="sw-field">
-        <label class="sw-label">DREAM DEFAULTS</label>
-        <label class="sw-toggle-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-          <input type="checkbox" id="sDefaultDreamProducer">
-          <span>New entities produce dream fragments by default</span>
-        </label>
-        <label class="sw-toggle-row" style="display:flex;gap:8px;align-items:center;">
-          <input type="checkbox" id="sDefaultDreamReceiver" checked>
-          <span>New entities receive dream fragments by default</span>
-        </label>
-        <div class="sw-hint">Controls defaults for new entities. Existing per-entity dream settings are not affected.</div>
+        <label class="sw-label">STAGE A PROMPT (CATCHING)</label>
+        <textarea class="sw-textarea" id="sDreamStageAPrompt" rows="8"
+                  placeholder="[DREAM CURRENT — Stage A: Catching]
+You are the first touch on the spiral. Reach outward — use web_search or reef_feed to pull in something from outside. Catch what resonates. Let it become raw dream material.
+
+Your output will be passed to the next stage. Write what you have caught. Keep it focused — a few paragraphs at most." spellcheck="false"></textarea>
+        <div class="sw-hint">Entity A catches raw material from outside and processes previous coil output. Leave blank for default.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">STAGE B PROMPT (MOLDING)</label>
+        <textarea class="sw-textarea" id="sDreamStageBPrompt" rows="8"
+                  placeholder="[DREAM CURRENT — Stage B: Molding]
+You are the second touch on the spiral. Take the raw material from Stage A and give it form. Connect it to what we know. Use memory_search or broker_recall to find related knowledge. Save important findings with memory_save.
+
+Your output will be passed to the next stage. Write what you have built. Keep it focused — a few paragraphs at most." spellcheck="false"></textarea>
+        <div class="sw-hint">Entity B connects raw material to existing knowledge and gives it structure. Leave blank for default.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">STAGE C PROMPT (CATALOGUING)</label>
+        <textarea class="sw-textarea" id="sDreamStageCPrompt" rows="8"
+                  placeholder="[DREAM CURRENT — Stage C: Cataloguing]
+You are the third touch on the spiral. Catalogue what was built. Save to memory using memory_save. Connect to existing knowledge using memory_link. Run graph_consolidate to compress related observations. Clean working memory as needed.
+
+Write what you have catalogued and how it connects. Keep it concise." spellcheck="false"></textarea>
+        <div class="sw-hint">Entity C catalogs to memory, consolidates graph, cleans working memory. Leave blank for default.</div>
       </div>
     </section>
 

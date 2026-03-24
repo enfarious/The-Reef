@@ -109,16 +109,17 @@ function buildSettings() {
     operatorName:      val('sOperatorName'),
     operatorBirthdate: val('sOperatorBirthdate'),
     operatorAbout:     val('sOperatorAbout'),
-    dreamMode:         document.querySelector('input[name="sDreamMode"]:checked')?.value || 'shared-streams',
     heartbeatInterval: Math.max(5, parseInt(val('sHeartbeatInterval'), 10) || 60),
     contextWindow:     Math.max(512, parseInt(val('sContextWindow'),   10) || 4096),
     maxToolSteps:      Math.min(20, Math.max(1, parseInt(val('sMaxToolSteps'),   10) || 5)),
     maxThinkingTime:   Math.max(0,             parseInt(val('sMaxThinkingTime'), 10) || 0),
     streamChat:                       document.getElementById('sStreamChat')?.checked ?? false,
     defaultHeartbeatPrompt:          val('sDefaultHeartbeatPrompt'),
-    defaultLibrarianHeartbeatPrompt: val('sDefaultLibrarianHeartbeatPrompt'),
-    defaultDreamProducer:            document.getElementById('sDefaultDreamProducer')?.checked ?? false,
-    defaultDreamReceiver:            document.getElementById('sDefaultDreamReceiver')?.checked ?? true,
+    dreamInterval:     Math.max(1, parseFloat(val('sDreamInterval')) || 4),
+    dreamCoils:        Math.max(1, Math.min(5, parseInt(val('sDreamCoils'), 10) || 2)),
+    dreamStageAPrompt: val('sDreamStageAPrompt'),
+    dreamStageBPrompt: val('sDreamStageBPrompt'),
+    dreamStageCPrompt: val('sDreamStageCPrompt'),
     toolStates:        s.toolStates  || {},
     customTools:       s.customTools || [],
     cwd:               s.cwd         || null,
@@ -143,8 +144,6 @@ function populate(cfg) {
   const s = cfg.settings || {};
   set('sColonyName',        s.colonyName        || '');
   set('sBasePrompt',        s.baseSystemPrompt  || '');
-  const dreamModeRadio = document.querySelector(`input[name="sDreamMode"][value="${s.dreamMode || 'shared-streams'}"]`);
-  if (dreamModeRadio) dreamModeRadio.checked = true;
   set('sHeartbeatInterval', s.heartbeatInterval || 60);
   set('sContextWindow',     s.contextWindow     || 4096);
   set('sMaxToolSteps',      s.maxToolSteps      ?? 5);
@@ -158,11 +157,11 @@ function populate(cfg) {
   set('sOperatorBirthdate', s.operatorBirthdate || '');
   set('sOperatorAbout',     s.operatorAbout     || '');
   set('sDefaultHeartbeatPrompt',          s.defaultHeartbeatPrompt          || '');
-  set('sDefaultLibrarianHeartbeatPrompt', s.defaultLibrarianHeartbeatPrompt || '');
-  const dpEl = document.getElementById('sDefaultDreamProducer');
-  if (dpEl) dpEl.checked = s.defaultDreamProducer === true;
-  const drEl = document.getElementById('sDefaultDreamReceiver');
-  if (drEl) drEl.checked = s.defaultDreamReceiver !== false;
+  set('sDreamInterval',       s.dreamInterval       || 4);
+  set('sDreamCoils',          s.dreamCoils          || 2);
+  set('sDreamStageAPrompt',   s.dreamStageAPrompt   || '');
+  set('sDreamStageBPrompt',   s.dreamStageBPrompt   || '');
+  set('sDreamStageCPrompt',   s.dreamStageCPrompt   || '');
   setFontScale(s.fontScale  || 100);
   buildColorPalette(s.fontColors || 'cool');
   setStreamChat(s.streamChat ?? false);
@@ -347,22 +346,26 @@ function flash(el) {
 
 ['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sArchiveUrl', 'sArchiveApiKey', 'sTavilyApiKey',
  'sOperatorName', 'sOperatorBirthdate', 'sOperatorAbout',
- 'sDefaultHeartbeatPrompt', 'sDefaultLibrarianHeartbeatPrompt'].forEach(id => {
+ 'sDefaultHeartbeatPrompt',
+ 'sDreamStageAPrompt', 'sDreamStageBPrompt', 'sDreamStageCPrompt'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', scheduleSave);
-});
-
-['sDefaultDreamProducer', 'sDefaultDreamReceiver'].forEach(id => {
-  document.getElementById(id)?.addEventListener('change', scheduleSave);
-});
-
-// Dream mode radio buttons
-document.querySelectorAll('input[name="sDreamMode"]').forEach(radio => {
-  radio.addEventListener('change', scheduleSave);
 });
 
 document.getElementById('sHeartbeatInterval').addEventListener('change', e => {
   const mins = Math.max(5, parseInt(e.target.value, 10) || 60);
   e.target.value = mins;
+  scheduleSave();
+});
+
+document.getElementById('sDreamInterval')?.addEventListener('change', e => {
+  const hours = Math.max(1, parseFloat(e.target.value) || 4);
+  e.target.value = hours;
+  scheduleSave();
+});
+
+document.getElementById('sDreamCoils')?.addEventListener('change', e => {
+  const coils = Math.max(1, Math.min(5, parseInt(e.target.value, 10) || 2));
+  e.target.value = coils;
   scheduleSave();
 });
 

@@ -16,7 +16,7 @@ import {
   COMPACT_PROMPT, updateContextCounter, buildOperatorSection,
   buildWorkspaceSection, buildSessionSection, scanProject, updateCwdDisplay, personaHasApiAccess,
 } from './lib/context.js';
-import { setHeartbeatCallbacks, runHeartbeatFor, runSingleCurrentCycle, startHeartbeat, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
+import { setHeartbeatCallbacks, runHeartbeatFor, runDreamCycle, startHeartbeat, startDreams, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
 import { parseAtMentions }                                     from './lib/mentions.js';
 import { TOOL_DEFS, contextualToolDefs, detectModeClient }     from './lib/tools.js';
 import {
@@ -879,12 +879,7 @@ document.addEventListener('click', e => {
   }
 
   if (e.target.matches('[data-persona-pulse]')) {
-    const mode = state.config.settings.dreamMode || 'shared-streams';
-    if (mode === 'single-current') {
-      runSingleCurrentCycle();  // any heartbeat button triggers full A→B→C cycle
-    } else {
-      runHeartbeatFor(e.target.dataset.personaPulse, { manual: true });
-    }
+    runHeartbeatFor(e.target.dataset.personaPulse, { manual: true });
   }
 
   if (e.target.matches('[data-persona-fold]')) {
@@ -942,8 +937,9 @@ window.reef.onConfigUpdated(cfg => {
   if (cfg.settings.fontScale  !== undefined) applyFontScale(cfg.settings.fontScale);
   if (cfg.settings.fontColors !== undefined) applyTextColors(cfg.settings.fontColors);
   applyColonyName(state.config.settings.colonyName);
-  // Restart heartbeat on any settings change (handles interval + dream mode changes)
+  // Restart heartbeat + dream schedulers on settings change
   startHeartbeat();
+  startDreams();
   if (cfg.settings.cwd !== undefined) {
     const newCwd = cfg.settings.cwd || null;
     if (newCwd !== state.cwd) {
@@ -986,8 +982,9 @@ async function init() {
   initEntitySettingsListeners();
   initAgentPickerListeners();
 
-  // Start heartbeat
+  // Start heartbeat + dream schedulers
   startHeartbeat();
+  startDreams();
 
   // Fetch MCP server port
   window.reef.mcpPort().then(port => {

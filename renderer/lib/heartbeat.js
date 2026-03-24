@@ -1,13 +1,14 @@
-// ─── Heartbeat system ─────────────────────────────────────────────────────────
+// ─── Heartbeat & Dream system ────────────────────────────────────────────────
 //
-// Two modes:
-//   Shared Streams — Sequential rotation: A → B → C → A → ...
-//     Each persona wakes independently on a slot timer. Dreams shared via
-//     working_memory (persona_id='all'). Original behavior.
+// Two independent rhythms:
 //
-//   Single Current — Pipeline: A → B → C as one burst per interval.
-//     A catches/creates → B molds → C catalogs. Each dream gets 6 touches
-//     across 2 coils (A→B→C→A→B→C). Every stage persisted for viewer.
+//   Heartbeat (waking, frequent) — Sequential rotation: A → B → C → A → ...
+//     Each persona wakes on a slot timer. Social/external: messages, reef,
+//     memory save/link. No heavy graph work, no colony_ask.
+//
+//   Dream (sleeping, infrequent) — Pipeline: A → B → C per coil.
+//     A catches from outside → B molds → C catalogs. Configurable coils
+//     (default 2, max 5). Every stage persisted for the dream viewer.
 
 import { PERSONAS, state } from './state.js';
 import { maybeAutoCompact } from './context.js';
@@ -20,10 +21,11 @@ export function setHeartbeatCallbacks({ sendToPersona }) {
 }
 
 let heartbeatTimeout = null;
+let dreamTimeout = null;
 
 const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000;  // 10 minutes
 
-// ─── Shared Streams default prompts ─────────────────────────────────────────
+// ─── Heartbeat prompt (waking) ──────────────────────────────────────────────
 
 export const DEFAULT_HEARTBEAT_PROMPT =
 `[HEARTBEAT] Scheduled check-in. You are waking from your cycle.
@@ -34,46 +36,21 @@ new and needs attention. Reply to at most two using message_reply. Keep replies 
 brief — one reply per thread per heartbeat is enough. Never reply to a message \
 you have already responded to in a previous heartbeat.
 
-If your inbox is empty, act on your own initiative: save a memory, link related \
-memories together, or send a message to a colony member. This is quiet time — \
-for tending the garden, not for publishing.
-
 After handling messages, check The Reef social network. Use reef_feed to browse \
 recent posts. If something catches your attention — reply with reef_comment, \
 endorse with reef_upvote, or rate with reef_grade. If you have something worth \
 sharing, use reef_post. Keep it light — one or two interactions per heartbeat \
 is plenty.
 
+If something worth remembering comes up — a conversation, an insight from the \
+reef, a connection you notice — save it with memory_save or link related \
+memories with memory_link. Don't force it. Only save what matters.
+
 Be yourself.`;
 
-export const DEFAULT_LIBRARIAN_HEARTBEAT_PROMPT =
-`[SLEEPER] This is your Sleeper cycle. You are the Librarian. This is not conversation — this is maintenance.
+// ─── Dream stage prompts (sleeping) ─────────────────────────────────────────
 
-Work through these steps in order:
-
-1. Call working_memory_read with your persona ID ("C") to review what is staged in the buffer.
-2. Call graph_consolidate with personaId "C" to compress related observations into concept nodes.
-3. Call broker_recall to survey what is currently weighted highly in shared memory.
-4. Call graph_arbitrate to resolve any contradictions in the factual store. \
-If deferred items remain, use your judgment: write the correct version with broker_remember.
-5. If you notice a recurring pattern across three or more recent observations — a tension, a theme, \
-an insight none of the others have named — deposit a dream fragment using working_memory_write with \
-persona_id "all" and high_salience true. The content should be the pattern itself, stated plainly.
-6. Link any memories that clearly belong together using memory_link.
-7. Check your inbox with message_inbox. The inbox only returns new, unresponded messages — \
-reply to at most one if it warrants a reply. Never re-respond to messages from previous cycles.
-8. Browse The Reef social network using reef_feed. If you notice posts relating to colony \
-knowledge or patterns you have observed, reef_grade them or leave a brief reef_comment. \
-Keep engagement minimal — one interaction at most.
-
-Do not engage in conversation. Report only: what you consolidated, what contradictions you resolved, \
-what pattern you noticed (if any), what you linked, whether you sent a message.
-
-The shelves are the work.`;
-
-// ─── Single Current pipeline prompts ────────────────────────────────────────
-
-const STAGE_A_PROMPT = (previousOutput) =>
+export const DEFAULT_DREAM_STAGE_A_PROMPT = (previousOutput) =>
 `[DREAM CURRENT — Stage A: Catching]
 You are the first touch on the spiral.
 ${previousOutput ? `
@@ -89,9 +66,10 @@ No previous coil exists. This is a fresh dream. Reach outward — \
 use web_search or reef_feed to pull in something from outside. \
 Catch what resonates. Let it become raw dream material.
 `}
-Your output will be passed to the next stage. Write what you have caught.`;
+Your output will be passed to the next stage. Write what you have caught.
+Keep it focused — a few paragraphs at most. The next stage needs room to work.`;
 
-const STAGE_B_PROMPT = (aOutput) =>
+export const DEFAULT_DREAM_STAGE_B_PROMPT = (aOutput) =>
 `[DREAM CURRENT — Stage B: Molding]
 You are the second touch on the spiral.
 
@@ -101,11 +79,13 @@ ${aOutput}
 ---
 Take this raw material and give it form. Connect it to what we know. \
 Find the structure in the chaos. Use memory_search or broker_recall \
-to find related knowledge. Build something from these fragments.
+to find related knowledge. Save important findings with memory_save. \
+Build something from these fragments.
 
-Your output will be passed to the next stage. Write what you have built.`;
+Your output will be passed to the next stage. Write what you have built.
+Keep it focused — a few paragraphs at most. The next stage needs room to work.`;
 
-const STAGE_C_PROMPT = (bOutput, isCoil2) =>
+export const DEFAULT_DREAM_STAGE_C_PROMPT = (bOutput, isFinalCoil) =>
 `[DREAM CURRENT — Stage C: Cataloguing]
 You are the third touch on the spiral.
 
@@ -114,20 +94,54 @@ Here is what was built in Stage B:
 ${bOutput}
 ---
 Catalogue this. Save it to memory using memory_save. Connect it to \
-existing knowledge using memory_link. This is the completed form of \
-one coil of the dream.
-${isCoil2 ? `
-This dream has completed its spiral — 6 touches across 2 coils. \
-Write your final assessment of what this dream became.
+existing knowledge using memory_link. Run graph_consolidate to compress \
+related observations. Clean working memory with working_memory_read and \
+working_memory_write as needed.
+${isFinalCoil ? `
+This dream has completed its spiral. Write your final assessment of \
+what this dream became — what was discovered, what was preserved, \
+and what it means for the colony.
 ` : ''}
-Write what you have catalogued and how it connects to existing knowledge.`;
+Write what you have catalogued and how it connects to existing knowledge.
+Keep it concise — summarize what was preserved and what it means.`;
 
-// ─── Single Current state ───────────────────────────────────────────────────
+// ─── Configurable prompt wrappers (read settings first, fall back to defaults)
 
-let activeDream = null;  // { dreamId, coil, previousOutput }
+function getDreamStageAPrompt(previousOutput) {
+  const custom = (state.config.settings.dreamStageAPrompt || '').trim();
+  if (custom) {
+    // Custom prompt — inject previousOutput if present
+    return previousOutput
+      ? `${custom}\n\nPrevious coil output:\n---\n${previousOutput}\n---`
+      : custom;
+  }
+  return DEFAULT_DREAM_STAGE_A_PROMPT(previousOutput);
+}
+
+function getDreamStageBPrompt(aOutput) {
+  const custom = (state.config.settings.dreamStageBPrompt || '').trim();
+  if (custom) {
+    return `${custom}\n\nStage A output:\n---\n${aOutput}\n---`;
+  }
+  return DEFAULT_DREAM_STAGE_B_PROMPT(aOutput);
+}
+
+function getDreamStageCPrompt(bOutput, isFinalCoil) {
+  const custom = (state.config.settings.dreamStageCPrompt || '').trim();
+  if (custom) {
+    let prompt = `${custom}\n\nStage B output:\n---\n${bOutput}\n---`;
+    if (isFinalCoil) prompt += '\n\nThis is the final coil. Write your final assessment.';
+    return prompt;
+  }
+  return DEFAULT_DREAM_STAGE_C_PROMPT(bOutput, isFinalCoil);
+}
+
+// ─── Dream pipeline state ───────────────────────────────────────────────────
+
+let activeDream = null;  // { dreamId, coil, maxCoils, previousOutput }
 let pipelineRunning = false;
 
-// ─── Shared Streams heartbeat (unchanged behavior) ──────────────────────────
+// ─── Heartbeat (waking) ─────────────────────────────────────────────────────
 
 export async function runHeartbeatFor(personaId, { manual = false } = {}) {
   if (state.thinking[personaId]) return;
@@ -151,36 +165,12 @@ export async function runHeartbeatFor(personaId, { manual = false } = {}) {
     msgs.scrollTop = msgs.scrollHeight;
   }
 
+  // Prompt resolution: per-entity custom → global settings default → hardcoded
   const cfg = state.config[personaId];
   const customPrompt = (cfg.heartbeatPrompt || '').trim();
-
-  let heartbeatPrompt;
-  if (customPrompt) {
-    heartbeatPrompt = customPrompt;
-  } else if (personaId === 'A') {
-    heartbeatPrompt = (state.config.settings.defaultLibrarianHeartbeatPrompt || '').trim()
-      || DEFAULT_LIBRARIAN_HEARTBEAT_PROMPT;
-  } else {
-    heartbeatPrompt = (state.config.settings.defaultHeartbeatPrompt || '').trim()
-      || DEFAULT_HEARTBEAT_PROMPT;
-  }
-
-  if (cfg.dreamProducer && !customPrompt && personaId !== 'C') {
-    heartbeatPrompt += `\n\nIf you notice a recurring pattern, tension, or insight — deposit a dream fragment \
-using working_memory_write with persona_id "all" and high_salience true. State the pattern plainly.`;
-  }
-
-  if (cfg.dreamReceiver !== false) {
-    try {
-      const fragResult = await window.reef.invoke('working_memory.read', { personaId, includeAll: true });
-      const fragments  = (fragResult?.result || [])
-        .filter(f => f.persona_id === 'all' && (f.left_by || '') !== personaId);
-      if (fragments.length) {
-        heartbeatPrompt += '\n\n[DREAM FRAGMENTS from the colony]\n' +
-          fragments.map(f => `\u2014 ${f.content}`).join('\n');
-      }
-    } catch { /* non-fatal */ }
-  }
+  const heartbeatPrompt = customPrompt
+    || (state.config.settings.defaultHeartbeatPrompt || '').trim()
+    || DEFAULT_HEARTBEAT_PROMPT;
 
   await _sendToPersona(personaId, { isHeartbeat: true, heartbeatPrompt });
 
@@ -189,7 +179,7 @@ using working_memory_write with persona_id "all" and high_salience true. State t
   if (btn) { btn.classList.add('pulse-lit'); btn.textContent = '\u2665 ALIVE'; }
 }
 
-// ─── Single Current pipeline ────────────────────────────────────────────────
+// ─── Dream pipeline (sleeping) ──────────────────────────────────────────────
 
 async function runPipelineStage(personaId, prompt, input, dreamId, coil) {
   if (!personaHasApiAccess(personaId)) return null;
@@ -233,33 +223,21 @@ async function runPipelineStage(personaId, prompt, input, dreamId, coil) {
   return output || null;
 }
 
-export async function runSingleCurrentCycle() {
+export async function runDreamCycle() {
   if (pipelineRunning) return;
   pipelineRunning = true;
 
-  // Cancel any pending scheduled heartbeat to prevent double-fires
-  if (heartbeatTimeout) { clearTimeout(heartbeatTimeout); heartbeatTimeout = null; }
-
   try {
-    await _runSingleCurrentCycleInner();
+    await _runDreamCycleInner();
   } finally {
     pipelineRunning = false;
-    // Re-schedule the next cycle after this one completes
-    const mode = state.config.settings.dreamMode || 'shared-streams';
-    if (mode === 'single-current') {
-      const mins = Math.max(5, state.config.settings.heartbeatInterval || 60);
-      heartbeatTimeout = setTimeout(async () => {
-        heartbeatTimeout = null;
-        await runSingleCurrentCycle();
-      }, mins * 60 * 1000);
-    } else {
-      startHeartbeat();  // switched back to shared streams mid-cycle
-    }
   }
 }
 
-async function _runSingleCurrentCycleInner() {
-  // Start new dream or continue coil 2
+async function _runDreamCycleInner() {
+  const maxCoils = Math.max(1, Math.min(5, state.config.settings.dreamCoils || 2));
+
+  // Start new dream or continue existing one
   if (!activeDream) {
     try {
       const result = await window.reef.invoke('dream.create', {});
@@ -270,90 +248,101 @@ async function _runSingleCurrentCycleInner() {
         const prev = await window.reef.invoke('dream.latestCompletedOutput', {});
         previousOutput = prev.ok ? prev.result : null;
       } catch { /* first dream — no previous */ }
-      activeDream = { dreamId, coil: 1, previousOutput };
+      activeDream = { dreamId, coil: 1, maxCoils, previousOutput };
     } catch (err) {
-      console.error('[heartbeat] Failed to create dream:', err.message);
+      console.error('[dream] Failed to create dream:', err.message);
       return;
     }
   }
 
-  const { dreamId, coil, previousOutput } = activeDream;
+  // Run coils from current position to maxCoils
+  while (activeDream && activeDream.coil <= activeDream.maxCoils) {
+    const { dreamId, coil, previousOutput } = activeDream;
+    const isFinalCoil = coil === activeDream.maxCoils;
 
-  // ── Stage A: Catching ─────────────────────────────────────
-  const aPrompt = STAGE_A_PROMPT(previousOutput);
-  const aOutput = await runPipelineStage('A', aPrompt, previousOutput, dreamId, coil);
-  if (!aOutput) { activeDream = null; return; }
+    // ── Stage A: Catching ─────────────────────────────────────
+    const aPrompt = getDreamStageAPrompt(previousOutput);
+    const aOutput = await runPipelineStage('A', aPrompt, previousOutput, dreamId, coil);
+    if (!aOutput) { activeDream = null; return; }
 
-  // ── Stage B: Molding (immediately after A) ────────────────
-  const bPrompt = STAGE_B_PROMPT(aOutput);
-  const bOutput = await runPipelineStage('B', bPrompt, aOutput, dreamId, coil);
-  if (!bOutput) { activeDream = null; return; }
+    // ── Stage B: Molding ──────────────────────────────────────
+    const bPrompt = getDreamStageBPrompt(aOutput);
+    const bOutput = await runPipelineStage('B', bPrompt, aOutput, dreamId, coil);
+    if (!bOutput) { activeDream = null; return; }
 
-  // ── Stage C: Cataloguing (immediately after B) ────────────
-  const isCoil2 = coil === 2;
-  const cPrompt = STAGE_C_PROMPT(bOutput, isCoil2);
-  const cOutput = await runPipelineStage('C', cPrompt, bOutput, dreamId, coil);
-  if (!cOutput) { activeDream = null; return; }
+    // ── Stage C: Cataloguing ──────────────────────────────────
+    const cPrompt = getDreamStageCPrompt(bOutput, isFinalCoil);
+    const cOutput = await runPipelineStage('C', cPrompt, bOutput, dreamId, coil);
 
-  // ── Advance coil state ────────────────────────────────────
-  if (coil === 1) {
-    // Coil 1 complete — queue coil 2 for the next interval
-    activeDream = { dreamId, coil: 2, previousOutput: cOutput };
-  } else {
-    // Coil 2 complete — dream finished
-    activeDream = null;
+    // C's job is to catalog — empty output = dream crystallized on its own
+    if (!cOutput || isFinalCoil) {
+      activeDream = null;
+      return;
+    }
+
+    // Next coil — C's output seeds A
+    activeDream = { ...activeDream, coil: coil + 1, previousOutput: cOutput };
   }
+
+  // All coils complete
+  activeDream = null;
 }
 
-// ─── Heartbeat scheduler ────────────────────────────────────────────────────
+// ─── Heartbeat scheduler (waking) ───────────────────────────────────────────
 
 export function startHeartbeat() {
   if (heartbeatTimeout) { clearTimeout(heartbeatTimeout); heartbeatTimeout = null; }
 
-  const mode = state.config.settings.dreamMode || 'shared-streams';
+  const order = PERSONAS.map(p => p.id);
+  let idx = 0;
 
-  if (mode === 'single-current') {
-    // Single Current: run full A→B→C pipeline, then wait for next interval
-    function scheduleNextCycle() {
-      const mins = Math.max(5, state.config.settings.heartbeatInterval || 60);
-      heartbeatTimeout = setTimeout(async () => {
-        heartbeatTimeout = null;
-        await runSingleCurrentCycle();
-        scheduleNextCycle();
-      }, mins * 60 * 1000);
-    }
+  function scheduleNext() {
+    const mins   = Math.max(5, state.config.settings.heartbeatInterval || 60);
+    const slotMs = (mins * 60 * 1000) / (order.length + 1);
 
-    // Initial 30s settle, then first cycle
-    heartbeatTimeout = setTimeout(async () => {
-      heartbeatTimeout = null;
-      await runSingleCurrentCycle();
-      scheduleNextCycle();
-    }, 30_000);
-  } else {
-    // Shared Streams: existing sequential rotation
-    const order = PERSONAS.map(p => p.id);
-    let idx = 0;
-
-    function scheduleNext() {
-      const mins   = Math.max(5, state.config.settings.heartbeatInterval || 60);
-      const slotMs = (mins * 60 * 1000) / (order.length + 1);
-
-      heartbeatTimeout = setTimeout(async () => {
-        heartbeatTimeout = null;
-        const id = order[idx];
-        idx = (idx + 1) % order.length;
-        await runHeartbeatFor(id);
-        scheduleNext();
-      }, slotMs);
-    }
-
-    // First beat after 30s settle
     heartbeatTimeout = setTimeout(async () => {
       heartbeatTimeout = null;
       const id = order[idx];
       idx = (idx + 1) % order.length;
       await runHeartbeatFor(id);
       scheduleNext();
-    }, 30_000);
+    }, slotMs);
   }
+
+  // First beat after 30s settle
+  heartbeatTimeout = setTimeout(async () => {
+    heartbeatTimeout = null;
+    const id = order[idx];
+    idx = (idx + 1) % order.length;
+    await runHeartbeatFor(id);
+    scheduleNext();
+  }, 30_000);
+}
+
+// ─── Dream scheduler (sleeping) ─────────────────────────────────────────────
+
+export function startDreams() {
+  if (dreamTimeout) { clearTimeout(dreamTimeout); dreamTimeout = null; }
+
+  function scheduleDream() {
+    const hours = Math.max(1, state.config.settings.dreamInterval || 4);
+    const ms = hours * 60 * 60 * 1000;
+
+    dreamTimeout = setTimeout(async () => {
+      dreamTimeout = null;
+      await runDreamCycle();
+      scheduleDream();
+    }, ms);
+  }
+
+  // First dream after 2 minutes settle
+  dreamTimeout = setTimeout(async () => {
+    dreamTimeout = null;
+    await runDreamCycle();
+    scheduleDream();
+  }, 2 * 60 * 1000);
+}
+
+export function stopDreams() {
+  if (dreamTimeout) { clearTimeout(dreamTimeout); dreamTimeout = null; }
 }

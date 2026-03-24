@@ -302,7 +302,7 @@ const SQL_DREAM_STAGES = `
   CREATE TABLE IF NOT EXISTS dream_stages (
     id         SERIAL      PRIMARY KEY,
     dream_id   TEXT        NOT NULL,
-    coil       INTEGER     NOT NULL CHECK (coil IN (1, 2)),
+    coil       INTEGER     NOT NULL CHECK (coil >= 1 AND coil <= 5),
     stage      TEXT        NOT NULL CHECK (stage IN ('A', 'B', 'C')),
     persona_id TEXT        NOT NULL,
     input      TEXT,
@@ -407,6 +407,12 @@ async function init() {
     } catch (err) {
       console.error('[db] ✗ dream_stages table:', err.message);
     }
+
+    // 8b. Migration: relax coil constraint from (1,2) to (1-5) for configurable coils
+    try {
+      await client.query(`ALTER TABLE dream_stages DROP CONSTRAINT IF EXISTS dream_stages_coil_check`);
+      await client.query(`ALTER TABLE dream_stages ADD CONSTRAINT dream_stages_coil_check CHECK (coil >= 1 AND coil <= 5)`);
+    } catch { /* non-fatal */ }
 
     console.log('[db] Schema ready.');
   } finally {
