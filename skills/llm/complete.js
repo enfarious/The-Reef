@@ -3,7 +3,7 @@
 const { detectMode, normalizeModel } = require('./detect-mode');
 const { fetchJson }           = require('./http');
 const { sanitizeResponse }    = require('./sanitize');
-const { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request } = require('./request-builders');
+const { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request, buildOpenRouterRequest } = require('./request-builders');
 const { parseAnthropicResponse, parseOpenAIResponse, parseLMStudioV1Response } = require('./parsers');
 
 // ─── complete ─────────────────────────────────────────────────────────────────
@@ -39,6 +39,8 @@ async function complete({ endpoint, model, systemPrompt, apiKey, messages, previ
     request = buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools, thinking });
   } else if (mode === 'lmstudio-v1') {
     request = buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store, integrations });
+  } else if (mode === 'openrouter') {
+    request = buildOpenRouterRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
   } else {
     request = buildOpenAIRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
   }

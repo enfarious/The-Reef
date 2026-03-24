@@ -1,7 +1,7 @@
 'use strict';
 
 const { detectMode, normalizeModel } = require('./detect-mode');
-const { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request } = require('./request-builders');
+const { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request, buildOpenRouterRequest } = require('./request-builders');
 const { streamOpenAI, streamAnthropic, streamLMStudioV1 } = require('./stream-parsers');
 
 // ─── stream ───────────────────────────────────────────────────────────────────
@@ -32,6 +32,9 @@ async function stream({ endpoint, model, systemPrompt, apiKey, messages, previou
     request.body.stream = true;
   } else if (mode === 'lmstudio-v1') {
     request = buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store, integrations });
+    request.body.stream = true;
+  } else if (mode === 'openrouter') {
+    request = buildOpenRouterRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
     request.body.stream = true;
   } else {
     request = buildOpenAIRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });

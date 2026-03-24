@@ -66,7 +66,7 @@ async function fetchModels({ endpoint, apiKey }) {
       state:        m.state             || 'unknown',
       type:         m.type              || 'llm',
       quantization: m.quantization      || null,
-      maxContext:   m.max_context_length || null,
+      maxContext:   m.loaded_context_length || m.max_context_length || m.context_length || null,
       arch:         m.arch              || null,
     }));
 }

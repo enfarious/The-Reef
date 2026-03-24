@@ -74,4 +74,12 @@ function buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, message
   return { url: endpoint, headers, body };
 }
 
-module.exports = { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request };
+// OpenRouter — OpenAI-compatible but requires extra headers.
+function buildOpenRouterRequest(endpoint, opts) {
+  const req = buildOpenAIRequest(endpoint, opts);
+  req.headers['HTTP-Referer'] = 'https://github.com/the-reef';
+  req.headers['X-Title'] = 'The Reef';
+  return req;
+}
+
+module.exports = { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request, buildOpenRouterRequest };

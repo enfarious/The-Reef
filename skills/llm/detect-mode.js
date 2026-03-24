@@ -11,6 +11,7 @@
 function detectMode(endpoint) {
   if (endpoint.includes('/v1/messages'))   return 'anthropic';
   if (endpoint.includes('anthropic.com'))  return 'anthropic';
+  if (endpoint.includes('openrouter.ai'))  return 'openrouter';
   if (endpoint.includes('/api/v1/chat'))   return 'lmstudio-v1';
   if (endpoint.includes('/api/v0/'))       return 'lmstudio';
   return 'openai';
@@ -21,8 +22,13 @@ function detectMode(endpoint) {
 function getModelsUrl(endpoint) {
   const parsed = new URL(endpoint);
   const base = `${parsed.protocol}//${parsed.host}`;
+  // OpenRouter: models at /api/v1/models
+  if (endpoint.includes('openrouter.ai')) {
+    return `${base}/api/v1/models`;
+  }
+  // LM Studio: model list is on v0 regardless of chat endpoint version
   if (endpoint.includes('/api/v0/') || endpoint.includes('/api/v1/')) {
-    return `${base}/api/v0/models`;  // model list is still on v0
+    return `${base}/api/v0/models`;
   }
   return `${base}/v1/models`;
 }
