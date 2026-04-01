@@ -297,6 +297,23 @@ const SQL_VOTES = `
   CREATE INDEX IF NOT EXISTS idx_vote_comments_vote_id ON vote_comments (vote_id);
 `;
 
+// ── 9. Tender feedback — signal learning loop ────────────────────────────────
+// Records whether the colony followed The Tender's save counsel.
+// Over time, thresholds recalibrate toward actual colony behavior.
+const SQL_TENDER_FEEDBACK = `
+  CREATE TABLE IF NOT EXISTS tender_feedback (
+    id           SERIAL      PRIMARY KEY,
+    persona_id   TEXT        NOT NULL,
+    signal_score FLOAT       NOT NULL,
+    was_saved    BOOLEAN     NOT NULL,
+    text_hash    TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tender_feedback_persona  ON tender_feedback(persona_id);
+  CREATE INDEX IF NOT EXISTS idx_tender_feedback_created  ON tender_feedback(created_at DESC);
+`;
+
 // ── 8. Dream pipeline stages ─────────────────────────────────────────────────
 const SQL_DREAM_STAGES = `
   CREATE TABLE IF NOT EXISTS dream_stages (
@@ -406,6 +423,14 @@ async function init() {
       console.log('[db] ✓ dream_stages table');
     } catch (err) {
       console.error('[db] ✗ dream_stages table:', err.message);
+    }
+
+    // 9. Tender feedback (independent, non-fatal)
+    try {
+      await client.query(SQL_TENDER_FEEDBACK);
+      console.log('[db] ✓ tender_feedback table');
+    } catch (err) {
+      console.error('[db] ✗ tender_feedback table:', err.message);
     }
 
     // 8b. Migration: relax coil constraint from (1,2) to (1-5) for configurable coils

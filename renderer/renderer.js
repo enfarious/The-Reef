@@ -32,6 +32,7 @@ import {
   initConfirmModal, initEntitySettingsListeners,
   openAgentPicker, initAgentPickerListeners,
 } from './lib/modals.js';
+import { tenderFlush, tenderPrePrompt, tenderPostResponse, tenderConsult, tenderRecordFeedback } from './lib/tender.js';
 
 // ─── Per-persona message queue ───────────────────────────────────────────────
 const messageQueue = { A: [], B: [], C: [] };
@@ -71,6 +72,7 @@ async function sendMessage() {
       (async () => {
         await maybeAutoCompact(id);
         appendUserMsg(id, raw, cleanText);
+        await tenderPrePrompt(id, cleanText);
         sendToPersona(id).finally(() => drainMessageQueue(id));
       })();
     }
@@ -93,6 +95,8 @@ async function compactPersona(id) {
   if (state.thinking[id]) return;
   const count = state.conversations[id].length;
   if (!count) return;
+  
+  await tenderFlush(id);
 
   state.conversations[id].push({ _id: uid(), role: 'user', content: COMPACT_PROMPT });
 
@@ -222,6 +226,13 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null, 
         }
       } else if (result._bubble) {
         result._bubble.remove();
+      }
+
+      if (text?.trim() && !isHeartbeat) {
+        tenderPostResponse(id, text);   // ← fire and forget, no await needed
+        // Consult The Tender — update hearth light with signal
+        const signal = tenderConsult(text, id);
+        updateHearthLight(signal.warmth);
       }
 
       clearToolAccumulator(id);
@@ -710,6 +721,8 @@ async function wakePersona(id) {
   const personaName = state.config[id].name || persona.name;
   const msgs = document.getElementById(`msgs-${id}`);
   const empty = document.getElementById(`empty-${id}`);
+  await tenderFlush(id);
+  
   if (empty) empty.style.display = 'none';
 
   const wakeBtn = document.querySelector(`[data-persona-wake="${id}"]`);
@@ -960,6 +973,15 @@ document.getElementById('userInput').addEventListener('keydown', e => {
     sendMessage();
   }
 });
+
+// ─── Hearth Light — The Tender's ambient UI signal ──────────────────────────
+
+function updateHearthLight(warmth) {
+  const el = document.getElementById('hearthLight');
+  if (!el) return;
+  el.classList.remove('hearth-warm', 'hearth-cool', 'hearth-neutral');
+  el.classList.add(`hearth-${warmth}`);
+}
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 

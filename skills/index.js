@@ -186,6 +186,18 @@ registry.set('schedule.task',   schedule.scheduleTask);
 registry.set('schedule.list',   schedule.listTasks);
 registry.set('schedule.cancel', schedule.cancelTask);
 
+// Tender feedback — tiny inline skill, no separate file needed
+const { pool: tenderPool } = require('./db');
+registry.set('tender.feedback', async (args) => {
+  const { persona_id, signal_score, was_saved, text_hash } = args;
+  await tenderPool.query(
+    `INSERT INTO tender_feedback (persona_id, signal_score, was_saved, text_hash)
+     VALUES ($1, $2, $3, $4)`,
+    [persona_id, signal_score, was_saved, text_hash]
+  );
+  return { recorded: true };
+});
+
 module.exports = {
   get: (name) => registry.get(name),
   list: () => [...registry.keys()],
