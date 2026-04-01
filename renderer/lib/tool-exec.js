@@ -1,12 +1,18 @@
 // ─── Tool execution — IPC dispatch, colony_ask, custom tools ─────────────────
 
 import { PERSONAS, state } from './state.js';
-import { SKILL_MAP } from './tools.js';
-import { appendTransmissionMsg, appendAssistantMsg, setThinking } from './messages-ui.js';
-import { thinkingTimers } from './abort.js';
+import { SKILL_MAP, TOOL_DEFS, DEEP_DIVE_ALLOWED } from './tools.js';
+import {
+  appendTransmissionMsg, appendAssistantMsg, setThinking,
+  appendDeepDiveStart, appendDeepDiveTool, finalizeDeepDive,
+} from './messages-ui.js';
+import { thinkingTimers, abortFlags } from './abort.js';
 import { scheduleTask, cancelTask, listTasks } from './scheduler.js';
+import { tenderObserveTool, tenderRecordFeedback } from './tender.js';
 
-const COLONY_ASK_TIMEOUT_MS = 90_000;  // 90s — must be shorter than maxThinkingTime
+const COLONY_ASK_TIMEOUT_MS = 90_000;   // 90s — must be shorter than maxThinkingTime
+const DEEP_DIVE_TIMEOUT_MS  = 180_000;  // 3 minutes
+const DEEP_DIVE_MAX_STEPS   = 20;
 
 // Injected callback — callPersonaOnce lives in the orchestrator
 let _callPersonaOnce;
@@ -17,9 +23,21 @@ export function setToolExecCallbacks({ callPersonaOnce }) {
 export async function executeTool(callerPersonaId, toolCall) {
   const { name, input } = toolCall;
 
+  tenderObserveTool(callerPersonaId, name, input);
+
+  // Tender feedback: a memory_save means the colony followed the signal
+  if (name === 'memory_save') {
+    tenderRecordFeedback(callerPersonaId, true);
+  }
+
   // colony_ask is handled renderer-side — runs a live completion
   if (name === 'colony_ask') {
     return executeColonyAsk(callerPersonaId, input);
+  }
+
+  // deep_dive — isolated research context
+  if (name === 'deep_dive') {
+    return executeDeepDive(callerPersonaId, input);
   }
 
   // Scheduled tasks — renderer-side (needs setTimeout + conversation access)
@@ -179,4 +197,153 @@ function restoreCallerTimer(id) {
       }
     }
   }, maxSecs * 1000);
+}
+
+// ─── deep_dive — isolated research context ──────────────────────────────────
+
+async function executeDeepDive(callerPersonaId, { goal, context }) {
+  if (!goal?.trim()) throw new Error('deep_dive requires a goal');
+
+  const startTime = Date.now();
+
+  // Build the allowed tool list for this dive
+  const toolStates = state.config.settings.toolStates || {};
+  const diveTools = TOOL_DEFS.filter(t =>
+    DEEP_DIVE_ALLOWED.has(t.name) && toolStates[t.name] !== false
+  ).map(t => {
+    // Strip to Anthropic tool schema shape
+    const { skillName, ...schema } = t;
+    return schema;
+  });
+
+  // Ephemeral work context — never touches state.conversations
+  const divePrompt = [
+    `[DEEP DIVE — Research Session]`,
+    `You are in a focused research context. Your main conversation is paused while you investigate.`,
+    ``,
+    `GOAL: ${goal}`,
+    context ? `\nCONTEXT: ${context}` : '',
+    ``,
+    `Use your tools to investigate thoroughly. When you have gathered enough, write your findings as a clear, structured summary. This summary will be returned to your main conversation.`,
+    ``,
+    `Be thorough but focused. Do not use conversational filler. Do not apologize. Just research and report.`,
+  ].filter(Boolean).join('\n');
+
+  const workMessages = [{ role: 'user', content: divePrompt }];
+
+  // UI indicator
+  appendDeepDiveStart(callerPersonaId, goal);
+
+  // Pause caller's thinking timer
+  const callerTimer = thinkingTimers[callerPersonaId];
+  if (callerTimer) {
+    clearTimeout(callerTimer);
+    thinkingTimers[callerPersonaId] = null;
+  }
+
+  const maxSteps = state.config.settings.deepDiveMaxSteps || DEEP_DIVE_MAX_STEPS;
+  let toolCallsExecuted = 0;
+  let finalText = null;
+
+  const diveWork = async () => {
+    for (let step = 0; step < maxSteps + 5; step++) {
+      if (abortFlags[callerPersonaId]) break;
+
+      const isLastStep = toolCallsExecuted >= maxSteps;
+      const tools = isLastStep ? [] : diveTools;
+
+      const result = await _callPersonaOnce(callerPersonaId, tools, undefined, {
+        messages: workMessages,
+        previousResponseId: undefined,
+        store: false,
+        suppressResponseId: true,
+        suppressStats: true,
+      });
+
+      if (!result) break;
+
+      const { text, toolUse, rawContent, mode: respMode } = result;
+
+      // No tool calls or last step → capture text and surface
+      if (!toolUse?.length || isLastStep) {
+        finalText = text?.trim() || null;
+        break;
+      }
+
+      // Push assistant turn to work context
+      if (respMode === 'anthropic') {
+        workMessages.push({ role: 'assistant', content: rawContent });
+      } else {
+        workMessages.push({
+          role: 'assistant',
+          content: text ?? '',
+          tool_calls: rawContent.tool_calls,
+        });
+      }
+
+      // Execute each tool call
+      toolCallsExecuted += toolUse.length;
+      const toolResults = [];
+
+      for (const tc of toolUse) {
+        appendDeepDiveTool(callerPersonaId, tc.name);
+        let resultStr;
+        try {
+          const raw = await executeTool(callerPersonaId, tc);
+          resultStr = (raw && typeof raw === 'object' && raw.__vision)
+            ? raw.description
+            : raw;
+        } catch (err) {
+          resultStr = `Error: ${err.message}`;
+        }
+        appendDeepDiveTool(callerPersonaId, tc.name, true);
+        toolResults.push({ id: tc.id, content: resultStr });
+      }
+
+      // Push tool results to work context
+      if (respMode === 'anthropic') {
+        workMessages.push({
+          role: 'user',
+          content: toolResults.map(r => ({
+            type: 'tool_result',
+            tool_use_id: r.id,
+            content: r.content,
+          })),
+        });
+      } else {
+        for (const r of toolResults) {
+          workMessages.push({ role: 'tool', tool_call_id: r.id, content: r.content });
+        }
+      }
+
+      // Yield to event loop periodically
+      if ((step + 1) % 3 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+  };
+
+  // Race against timeout
+  try {
+    await Promise.race([
+      diveWork(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Deep dive timed out after ${DEEP_DIVE_TIMEOUT_MS / 1000}s`)),
+          DEEP_DIVE_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (err) {
+    finalizeDeepDive(callerPersonaId, toolCallsExecuted, Date.now() - startTime);
+    restoreCallerTimer(callerPersonaId);
+    return `Deep dive error: ${err.message}`;
+  }
+
+  finalizeDeepDive(callerPersonaId, toolCallsExecuted, Date.now() - startTime);
+  restoreCallerTimer(callerPersonaId);
+
+  if (!finalText) {
+    return `Deep dive completed ${toolCallsExecuted} tool calls but produced no summary. The research may still have saved memories.`;
+  }
+
+  return finalText;
 }

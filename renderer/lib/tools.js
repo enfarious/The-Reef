@@ -722,12 +722,50 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    name: 'deep_dive',
+    description: 'Launch an isolated research session with full tool access. Use when a task requires multiple searches, exploration, or multi-step investigation that would clutter this conversation. You work in a separate scratchpad context — your findings are returned here as a summary. Prefer this over chaining many tool calls in the main conversation.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goal:    { type: 'string', description: 'What to research or accomplish. Be specific about what you need to find or understand.' },
+        context: { type: 'string', description: 'Optional background from the current conversation relevant to this dive.' },
+        persona: { type: 'string', description: 'Your persona name (lowercase). Required so the dive can use your endpoint and model.' },
+      },
+      required: ['goal', 'persona'],
+    },
+  },
 ];
 
 // tool name → IPC skill name (colony_ask handled separately)
 export const SKILL_MAP = Object.fromEntries(
   TOOL_DEFS.filter(t => t.skillName).map(t => [t.name, t.skillName])
 );
+
+// ─── Deep dive allowed tools ─────────────────────────────────────────────────
+// Research-oriented subset: read, search, recall — no destructive writes,
+// no recursion, no social actions, no scheduling.
+export const DEEP_DIVE_ALLOWED = new Set([
+  // memory (read + save, no dedupe/ecology)
+  'memory_search', 'memory_save', 'memory_link',
+  'broker_recall', 'broker_remember',
+  'graph_recall',
+  'working_memory_read',
+  // web research
+  'web_search', 'http_request',
+  'reddit_search', 'reddit_hot', 'reddit_post',
+  // reef reading (no posting, voting, DMing)
+  'reef_feed', 'reef_feed_all', 'reef_posts', 'reef_branches',
+  'reef_grades', 'reef_profile', 'reef_leaderboard',
+  'reef_documented_get', 'reef_documented_list',
+  // file system (read-only)
+  'fs_read', 'fs_list', 'fs_exists',
+  // code exploration
+  'code_search', 'project_scan',
+  'git_status', 'git_diff', 'git_log',
+  // message reading (no sending)
+  'message_search',
+]);
 
 // ─── Tool topic tags ─────────────────────────────────────────────────────────
 
@@ -802,6 +840,7 @@ const TOOL_TOPICS = {
   schedule_task:         ['schedule'],
   schedule_list:         ['schedule'],
   schedule_cancel:       ['schedule'],
+  deep_dive:             ['core'],
 };
 
 const PERSONA_TOPICS = {

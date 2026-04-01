@@ -923,6 +923,108 @@ header {
   50% { text-shadow: 0 0 8px rgba(251,191,36,0.7); background: rgba(251,191,36,0.06); }
 }
 
+/* ─── Deep Dive — isolated research indicator ─────────────────────────────── */
+.deep-dive-group {
+  border-left: 2px solid rgba(0,229,200,0.25);
+  padding-left: 10px;
+  margin: 8px 0;
+}
+.deep-dive-header {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.deep-dive-icon {
+  font-size: 0.85rem;
+}
+.deep-dive-goal {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 0.7rem;
+}
+.deep-dive-spinner {
+  animation: dive-spin 1.2s linear infinite;
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+@keyframes dive-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.deep-dive-tools {
+  padding: 4px 0 2px 12px;
+}
+.deep-dive-tool-call {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-faint);
+  padding: 1px 0;
+}
+.deep-dive-tool-result {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  padding: 1px 0;
+}
+.deep-dive-check { color: var(--accent); }
+.deep-dive-arrow { color: var(--text-faint); }
+.deep-dive-footer {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(0,229,200,0.12);
+}
+
+/* ─── Hearth Light — The Tender's ambient signal ──────────────────────────── */
+.hearth-light {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.hearth-ember {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  transition: background 1.2s ease, box-shadow 1.2s ease;
+}
+
+/* Warm — The Tender suggests saving */
+.hearth-light.hearth-warm .hearth-ember {
+  background: #e8a44a;
+  box-shadow: 0 0 6px 2px rgba(232,164,74,0.45), 0 0 14px 4px rgba(232,164,74,0.15);
+  animation: hearth-glow 2.4s ease-in-out infinite;
+}
+@keyframes hearth-glow {
+  0%, 100% { box-shadow: 0 0 6px 2px rgba(232,164,74,0.45), 0 0 14px 4px rgba(232,164,74,0.15); }
+  50%      { box-shadow: 0 0 8px 3px rgba(232,164,74,0.6),  0 0 18px 6px rgba(232,164,74,0.25); }
+}
+
+/* Cool — noise, let it go */
+.hearth-light.hearth-cool .hearth-ember {
+  background: rgba(255,255,255,0.08);
+  box-shadow: none;
+  animation: none;
+}
+
+/* Neutral — no strong signal */
+.hearth-light.hearth-neutral .hearth-ember {
+  background: rgba(255,255,255,0.18);
+  box-shadow: 0 0 3px 1px rgba(255,255,255,0.06);
+  animation: none;
+}
+
 /* Wake All button — lit when colony is fully awake */
 .wake-all-btn.wake-all-lit {
   color: var(--biolume-a);

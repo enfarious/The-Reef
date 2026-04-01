@@ -742,6 +742,19 @@ const MCP_TOOL_DEFS = [
       required: ['vote_id'],
     },
   },
+  {
+    name: 'deep_dive', skillName: 'deep_dive',
+    description: 'Launch an isolated research session. Use when a task requires multiple searches, exploration, or multi-step investigation. You work in a separate scratchpad context — your findings are returned as a summary.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal:    { type: 'string', description: 'What to research or accomplish. Be specific.' },
+        context: { type: 'string', description: 'Optional background context relevant to this dive.' },
+        persona: { type: 'string', description: 'Your persona name (lowercase). Required so the dive uses your endpoint and model.' },
+      },
+      required: ['goal', 'persona'],
+    },
+  },
 ];
 
 // tool name → skill name for dispatch

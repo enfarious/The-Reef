@@ -45,6 +45,7 @@ const BUILTIN_TOOLS = [
   { name: 'schedule_list',    description: 'List pending scheduled tasks.' },
   { name: 'schedule_cancel',  description: 'Cancel a scheduled task.' },
   { name: 'colony_ask',        description: 'Send a question or directive to another colony member.' },
+  { name: 'deep_dive',        description: 'Launch an isolated research session. Findings return to the main conversation.' },
 ];
 
 // ─── Text color presets ───────────────────────────────────────────────────────

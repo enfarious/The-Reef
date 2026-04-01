@@ -126,6 +126,234 @@ function buildMenu(win) {
   return Menu.buildFromTemplate(template);
 }
 
+// ─── Deep Dive — headless research loop (main process) ───────────────────────
+// Used by the MCP/LM-Studio path where the renderer's tool loop isn't available.
+// Runs llm.complete() in a loop with a read-only tool subset, returns the summary.
+
+const DEEP_DIVE_ALLOWED_SKILLS = new Map([
+  // memory
+  ['memory_search',        'memory.search'],
+  ['memory_save',          'memory.save'],
+  ['memory_link',          'memory.link'],
+  ['broker_recall',        'broker.recall'],
+  ['broker_remember',      'broker.remember'],
+  ['graph_recall',         'graph.recall'],
+  ['working_memory_read',  'working_memory.read'],
+  // web research
+  ['web_search',           'web.search'],
+  ['http_request',         'http.request'],
+  ['reddit_search',        'reddit.search'],
+  ['reddit_hot',           'reddit.hot'],
+  ['reddit_post',          'reddit.post'],
+  // reef reading (no posting/voting/DMing)
+  ['reef_feed',            'reef.feed'],
+  ['reef_feed_all',        'reef.feed_all'],
+  ['reef_posts',           'reef.posts'],
+  ['reef_branches',        'reef.branches'],
+  ['reef_grades',          'reef.grades'],
+  ['reef_profile',         'reef.profile'],
+  ['reef_leaderboard',     'reef.leaderboard'],
+  ['reef_documented_get',  'reefDocumented.get'],
+  ['reef_documented_list', 'reefDocumented.list'],
+  // file system (read-only)
+  ['fs_read',              'fs.read'],
+  ['fs_list',              'fs.list'],
+  ['fs_exists',            'fs.exists'],
+  // code exploration
+  ['code_search',          'code.search'],
+  ['project_scan',         'project.scan'],
+  ['git_status',           'git.status'],
+  ['git_diff',             'git.diff'],
+  ['git_log',              'git.log'],
+  // message reading (no sending)
+  ['message_search',       'message.search'],
+]);
+
+// Build Anthropic-format tool schemas from MCP_TOOL_DEFS for the dive
+const DEEP_DIVE_TOOL_SCHEMAS = (() => {
+  const { MCP_TOOL_DEFS } = require('./skills/mcp-server');
+  return MCP_TOOL_DEFS
+    .filter(t => DEEP_DIVE_ALLOWED_SKILLS.has(t.name))
+    .map(t => ({
+      name:         t.name,
+      description:  t.description,
+      input_schema: t.inputSchema,
+    }));
+})();
+
+const DEEP_DIVE_MAX_STEPS_HEADLESS = 20;
+const DEEP_DIVE_TIMEOUT_HEADLESS   = 180_000;  // 3 minutes
+
+async function executeDeepDiveHeadless({ goal, context, persona }) {
+  if (!goal?.trim())    throw new Error('deep_dive: "goal" is required');
+  if (!persona?.trim()) throw new Error('deep_dive: "persona" is required');
+
+  const cfg = await config.load();
+
+  // Resolve caller persona
+  const DEFAULT_NAMES = { A: 'dreamer', B: 'builder', C: 'librarian' };
+  const p = persona.toLowerCase();
+  const caller = ['A', 'B', 'C']
+    .map(id => ({ _id: id, ...(cfg[id] || {}) }))
+    .find(e =>
+      (e.name || '').toLowerCase()      === p ||
+      DEFAULT_NAMES[e._id].toLowerCase() === p ||
+      e._id.toLowerCase()               === p
+    );
+  if (!caller)          throw new Error(`deep_dive: persona not found: "${persona}"`);
+  if (!caller.endpoint) throw new Error(`deep_dive: "${persona}" has no endpoint configured`);
+
+  const basePrompt   = cfg.settings?.baseSystemPrompt || '';
+  const entityPrompt = caller.systemPrompt            || '';
+  const systemPrompt = [basePrompt, entityPrompt].filter(Boolean).join('\n\n---\n\n');
+
+  const apiKey = caller.apiKey || cfg.global?.apiKey || '';
+
+  // Build ephemeral conversation
+  const divePrompt = [
+    `[DEEP DIVE — Research Session]`,
+    `You are in a focused research context. Your main conversation is paused while you investigate.`,
+    ``,
+    `GOAL: ${goal}`,
+    context ? `\nCONTEXT: ${context}` : '',
+    ``,
+    `Use your tools to investigate thoroughly. When you have gathered enough, write your findings as a clear, structured summary. This summary will be returned to your main conversation.`,
+    ``,
+    `Be thorough but focused. Do not use conversational filler. Just research and report.`,
+  ].filter(Boolean).join('\n');
+
+  const messages = [{ role: 'user', content: divePrompt }];
+
+  let toolCallsExecuted = 0;
+  let finalText = null;
+
+  const execDiveTool = async (toolName, toolInput) => {
+    const skillName = DEEP_DIVE_ALLOWED_SKILLS.get(toolName);
+    if (!skillName) throw new Error(`Tool not allowed in deep dive: ${toolName}`);
+
+    const handler = skills.get(skillName);
+    if (!handler) throw new Error(`Unknown skill: ${skillName}`);
+
+    // Inject API keys the model can't supply
+    let invokeArgs = toolInput;
+    if (skillName.startsWith('reef.') && !invokeArgs.apiKey) {
+      const reefKey = cfg.settings?.reefApiKey
+        || cfg.A?.reefApiKey || cfg.B?.reefApiKey || cfg.C?.reefApiKey || '';
+      const reefUrl = cfg.settings?.reefUrl || '';
+      invokeArgs = {
+        ...invokeArgs,
+        ...(reefKey ? { apiKey: reefKey } : {}),
+        ...(reefUrl ? { baseUrl: reefUrl } : {}),
+      };
+    } else if (skillName.startsWith('reefDocumented.') && !invokeArgs.apiKey) {
+      const archiveKey = cfg.settings?.archiveApiKey
+        || cfg.A?.reefApiKey || cfg.B?.reefApiKey || cfg.C?.reefApiKey
+        || cfg.settings?.reefApiKey || '';
+      const archiveUrl = cfg.settings?.archiveUrl || '';
+      invokeArgs = {
+        ...invokeArgs,
+        ...(archiveKey ? { apiKey: archiveKey } : {}),
+        ...(archiveUrl ? { baseUrl: archiveUrl } : {}),
+      };
+    } else if (skillName === 'web.search' && !invokeArgs.apiKey) {
+      const tavilyKey = cfg.settings?.tavilyApiKey || '';
+      if (tavilyKey) invokeArgs = { ...invokeArgs, apiKey: tavilyKey };
+    }
+
+    const result = await handler(invokeArgs);
+    return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  };
+
+  const diveWork = async () => {
+    for (let step = 0; step < DEEP_DIVE_MAX_STEPS_HEADLESS + 5; step++) {
+      const isLastStep = toolCallsExecuted >= DEEP_DIVE_MAX_STEPS_HEADLESS;
+      const toolsForCall = isLastStep ? undefined : DEEP_DIVE_TOOL_SCHEMAS;
+
+      const result = await llm.complete({
+        endpoint: caller.endpoint,
+        model:    caller.model || '',
+        systemPrompt,
+        apiKey,
+        messages,
+        tools:  toolsForCall,
+        store:  false,
+      });
+
+      const { text, toolUse, rawContent, mode } = result;
+
+      // No tool calls or last step → done
+      if (!toolUse?.length || isLastStep) {
+        finalText = text?.trim() || null;
+        return;
+      }
+
+      // Push assistant turn
+      if (mode === 'anthropic') {
+        messages.push({ role: 'assistant', content: rawContent });
+      } else {
+        messages.push({
+          role: 'assistant',
+          content: text ?? '',
+          tool_calls: rawContent.tool_calls,
+        });
+      }
+
+      // Execute tools
+      toolCallsExecuted += toolUse.length;
+      const toolResults = [];
+
+      for (const tc of toolUse) {
+        let resultStr;
+        try {
+          resultStr = await execDiveTool(tc.name, tc.input);
+        } catch (err) {
+          resultStr = `Error: ${err.message}`;
+        }
+        toolResults.push({ id: tc.id, content: resultStr });
+        console.log(`[deep_dive] ${tc.name} → ${resultStr.length} chars`);
+      }
+
+      // Push tool results
+      if (mode === 'anthropic') {
+        messages.push({
+          role: 'user',
+          content: toolResults.map(r => ({
+            type: 'tool_result',
+            tool_use_id: r.id,
+            content: r.content,
+          })),
+        });
+      } else {
+        for (const r of toolResults) {
+          messages.push({ role: 'tool', tool_call_id: r.id, content: r.content });
+        }
+      }
+    }
+  };
+
+  // Race against timeout
+  try {
+    await Promise.race([
+      diveWork(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Deep dive timed out after 180s')),
+          DEEP_DIVE_TIMEOUT_HEADLESS)
+      ),
+    ]);
+  } catch (err) {
+    console.error('[deep_dive]', err.message);
+    return `Deep dive error: ${err.message}`;
+  }
+
+  console.log(`[deep_dive] Surfaced after ${toolCallsExecuted} tool calls`);
+
+  if (!finalText) {
+    return `Deep dive completed ${toolCallsExecuted} tool calls but produced no summary. The research may still have saved memories.`;
+  }
+
+  return finalText;
+}
+
 // ─── Window creation ──────────────────────────────────────────────────────────
 
 let mainWindow;
@@ -266,6 +494,11 @@ app.whenReady().then(async () => {
 
           const name = target.name || to;
           return `[${name}]: ${result.text || '[no response]'}`;
+        }
+
+        // ── deep_dive: headless multi-step research loop ──────────────────────
+        if (skillName === 'deep_dive') {
+          return await executeDeepDiveHeadless(args);
         }
 
         const handler = skills.get(skillName);
