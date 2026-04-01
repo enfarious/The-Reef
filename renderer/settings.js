@@ -117,6 +117,7 @@ function buildSettings() {
     defaultHeartbeatPrompt:          val('sDefaultHeartbeatPrompt'),
     dreamInterval:     Math.max(1, parseFloat(val('sDreamInterval')) || 4),
     dreamCoils:        Math.max(1, Math.min(5, parseInt(val('sDreamCoils'), 10) || 2)),
+    dreamTopics:       parseDreamTopics(),
     dreamStageAPrompt: val('sDreamStageAPrompt'),
     dreamStageBPrompt: val('sDreamStageBPrompt'),
     dreamStageCPrompt: val('sDreamStageCPrompt'),
@@ -127,6 +128,12 @@ function buildSettings() {
 }
 
 function val(id) { return document.getElementById(id)?.value ?? ''; }
+
+function parseDreamTopics() {
+  const raw = val('sDreamTopics').trim();
+  if (!raw) return [];
+  return raw.split('\n').map(t => t.trim()).filter(Boolean);
+}
 
 function buildDatabaseSettings() {
   return {
@@ -159,6 +166,7 @@ function populate(cfg) {
   set('sDefaultHeartbeatPrompt',          s.defaultHeartbeatPrompt          || '');
   set('sDreamInterval',       s.dreamInterval       || 4);
   set('sDreamCoils',          s.dreamCoils          || 2);
+  set('sDreamTopics',          (s.dreamTopics || []).join('\n'));
   set('sDreamStageAPrompt',   s.dreamStageAPrompt   || '');
   set('sDreamStageBPrompt',   s.dreamStageBPrompt   || '');
   set('sDreamStageCPrompt',   s.dreamStageCPrompt   || '');

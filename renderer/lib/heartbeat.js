@@ -48,10 +48,32 @@ memories with memory_link. Don't force it. Only save what matters.
 
 Be yourself.`;
 
+// ─── Dream topic pool (outside influences) ──────────────────────────────────
+
+const DEFAULT_DREAM_TOPICS = [
+  'current events', 'science', 'philosophy', 'music', 'art history',
+  'gaming', 'ecology', 'economics', 'space exploration', 'mythology',
+  'psychology', 'architecture', 'literature', 'mathematics', 'cooking',
+  'film', 'linguistics', 'geology', 'dance', 'cryptography',
+  'marine biology', 'poetry', 'urban planning', 'folklore', 'astronomy',
+];
+
+function pickDreamTopics(count = 2) {
+  const topics = state.config.settings.dreamTopics?.length
+    ? state.config.settings.dreamTopics
+    : DEFAULT_DREAM_TOPICS;
+  const shuffled = [...topics].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(count, shuffled.length));
+}
+
 // ─── Dream stage prompts (sleeping) ─────────────────────────────────────────
 
-export const DEFAULT_DREAM_STAGE_A_PROMPT = (previousOutput) =>
-`[DREAM CURRENT — Stage A: Catching]
+export const DEFAULT_DREAM_STAGE_A_PROMPT = (previousOutput, topics) => {
+  const topicLine = topics?.length
+    ? `\nTonight's current: let your search drift toward **${topics.join('** and **')}**. \
+These are suggestions, not rails — follow what actually catches you.`
+    : '';
+  return `[DREAM CURRENT — Stage A: Catching]
 You are the first touch on the spiral.
 ${previousOutput ? `
 Here is what emerged from the previous coil of the spiral:
@@ -65,9 +87,10 @@ Weave the old and new together into raw dream material.
 No previous coil exists. This is a fresh dream. Reach outward — \
 use web_search or reef_feed to pull in something from outside. \
 Catch what resonates. Let it become raw dream material.
-`}
+`}${topicLine}
 Your output will be passed to the next stage. Write what you have caught.
 Keep it focused — a few paragraphs at most. The next stage needs room to work.`;
+};
 
 export const DEFAULT_DREAM_STAGE_B_PROMPT = (aOutput) =>
 `[DREAM CURRENT — Stage B: Molding]
@@ -107,15 +130,19 @@ Keep it concise — summarize what was preserved and what it means.`;
 
 // ─── Configurable prompt wrappers (read settings first, fall back to defaults)
 
-function getDreamStageAPrompt(previousOutput) {
+function getDreamStageAPrompt(previousOutput, topics) {
   const custom = (state.config.settings.dreamStageAPrompt || '').trim();
   if (custom) {
-    // Custom prompt — inject previousOutput if present
-    return previousOutput
+    // Custom prompt — inject previousOutput and topics if present
+    let prompt = previousOutput
       ? `${custom}\n\nPrevious coil output:\n---\n${previousOutput}\n---`
       : custom;
+    if (topics?.length) {
+      prompt += `\n\nTonight's current: let your search drift toward **${topics.join('** and **')}**.`;
+    }
+    return prompt;
   }
-  return DEFAULT_DREAM_STAGE_A_PROMPT(previousOutput);
+  return DEFAULT_DREAM_STAGE_A_PROMPT(previousOutput, topics);
 }
 
 function getDreamStageBPrompt(aOutput) {
@@ -255,13 +282,16 @@ async function _runDreamCycleInner() {
     }
   }
 
+  // Pick topics once per dream — same suggestions across all coils
+  const dreamTopics = pickDreamTopics(2);
+
   // Run coils from current position to maxCoils
   while (activeDream && activeDream.coil <= activeDream.maxCoils) {
     const { dreamId, coil, previousOutput } = activeDream;
     const isFinalCoil = coil === activeDream.maxCoils;
 
     // ── Stage A: Catching ─────────────────────────────────────
-    const aPrompt = getDreamStageAPrompt(previousOutput);
+    const aPrompt = getDreamStageAPrompt(previousOutput, dreamTopics);
     const aOutput = await runPipelineStage('A', aPrompt, previousOutput, dreamId, coil);
     if (!aOutput) { activeDream = null; return; }
 

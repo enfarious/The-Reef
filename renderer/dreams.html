@@ -50,7 +50,7 @@
   }
   .stage-persona {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-size: 0.8rem;
     min-width: 20px;
   }
   .stage-persona.A { color: var(--biolume-a, #00e5c8); }
@@ -58,30 +58,37 @@
   .stage-persona.C { color: var(--biolume-c, #b794f6); }
   .stage-role {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.6rem;
-    color: var(--text-faint);
+    font-size: 0.75rem;
+    color: var(--text-dim);
     letter-spacing: 0.05em;
   }
   .stage-date {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.55rem;
-    color: var(--text-faint);
+    font-size: 0.7rem;
+    color: var(--text-dim);
     margin-left: auto;
   }
+  .dream-detail-container {
+    display: none;
+  }
+  .card.expanded .dream-detail-container {
+    display: block;
+  }
+
   .stage-input {
-    font-size: 0.78rem;
+    font-size: 0.88rem;
     color: var(--text-faint);
     font-style: italic;
-    padding: 4px 0 4px 30px;
-    max-height: 60px;
+    padding: 6px 0 6px 30px;
+    max-height: 80px;
     overflow: hidden;
-    opacity: 0.5;
+    opacity: 0.6;
   }
   .stage-output {
-    font-size: 0.82rem;
-    color: var(--text-dim);
-    padding: 4px 0 4px 30px;
-    line-height: 1.5;
+    font-size: 0.95rem;
+    color: var(--text-mid);
+    padding: 6px 0 6px 30px;
+    line-height: 1.6;
     white-space: pre-wrap;
   }
 </style>
