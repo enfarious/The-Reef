@@ -868,10 +868,11 @@ function createMcpServer({ execSkill }) {
       }
     });
 
-    // Bind to a random port on loopback — port 0 lets the OS pick
-    server.listen(0, '127.0.0.1', () => {
+    // Bind to all interfaces so remote LM Studio instances can reach it.
+    // Port 0 lets the OS pick a free port.
+    server.listen(0, '0.0.0.0', () => {
       const { port } = server.address();
-      console.log(`[mcp] Reef tool server listening on 127.0.0.1:${port}`);
+      console.log(`[mcp] Reef tool server listening on 0.0.0.0:${port}`);
       resolve({ server, port });
     });
 

@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+const os   = require('os');
 const skills    = require('./skills/index');
 const llm       = require('./skills/llm');
 const db        = require('./skills/db');
@@ -623,6 +624,20 @@ ipcMain.handle('skill:run', async (_event, skillName, args) => {
 // Renderer queries this once on startup to know where the local MCP server is.
 
 ipcMain.handle('mcp:port', () => mcpPort);
+
+// ─── IPC: local LAN IP ────────────────────────────────────────────────────────
+// Returns the first non-loopback IPv4 address (e.g. 192.168.1.x).
+// Used by the renderer to build the MCP server_url for remote LM Studio instances.
+
+ipcMain.handle('local:ip', () => {
+  const ifaces = os.networkInterfaces();
+  for (const iface of Object.values(ifaces)) {
+    for (const addr of iface) {
+      if (addr.family === 'IPv4' && !addr.internal) return addr.address;
+    }
+  }
+  return '127.0.0.1';
+});
 
 // ─── IPC: Claude CLI proxy info ───────────────────────────────────────────────
 // Returns { endpoint, status } so the renderer can resolve "claude-cli" sentinels

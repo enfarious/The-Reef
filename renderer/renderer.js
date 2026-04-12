@@ -146,10 +146,14 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null, 
       .map(t => t.name);
 
     if (enabledMcpTools.length) {
+      // If LM Studio is on a remote host it can't reach our loopback — use LAN IP.
+      const endpointHost = (() => { try { return new URL(endpoint).hostname; } catch { return 'localhost'; } })();
+      const isRemote = endpointHost !== 'localhost' && endpointHost !== '127.0.0.1';
+      const mcpHost = isRemote ? (state.localIp || '127.0.0.1') : '127.0.0.1';
       v1Integrations = [{
         type:          'ephemeral_mcp',
         server_label:  'reef',
-        server_url:    `http://127.0.0.1:${state.mcpPort}`,
+        server_url:    `http://${mcpHost}:${state.mcpPort}`,
         allowed_tools: enabledMcpTools,
       }];
     }
@@ -1008,10 +1012,14 @@ async function init() {
   startHeartbeat();
   startDreams();
 
-  // Fetch MCP server port
+  // Fetch MCP server port + local LAN IP (for remote LM Studio integrations)
   window.reef.mcpPort().then(port => {
     state.mcpPort = port;
     if (port) console.log(`[renderer] MCP server available on port ${port}`);
+  }).catch(() => {});
+  window.reef.localIp().then(ip => {
+    state.localIp = ip;
+    console.log(`[renderer] Local LAN IP: ${ip}`);
   }).catch(() => {});
 
   // Fetch Claude CLI proxy info
