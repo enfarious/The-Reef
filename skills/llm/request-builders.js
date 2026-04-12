@@ -4,10 +4,11 @@
 // `tools` is always in Anthropic format (canonical).
 // buildOpenAIRequest converts to OpenAI function-calling format internally.
 
-function buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools }) {
-  const body = { model, max_tokens: 2048, messages };
+function buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools, thinking }) {
+  const body = { model, max_tokens: thinking ? 16384 : 2048, messages };
   if (systemPrompt) body.system = systemPrompt;
   if (tools?.length) body.tools = tools;
+  if (thinking) body.thinking = thinking;
 
   const headers = {
     'Content-Type': 'application/json',
@@ -73,4 +74,12 @@ function buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, message
   return { url: endpoint, headers, body };
 }
 
-module.exports = { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request };
+// OpenRouter — OpenAI-compatible but requires extra headers.
+function buildOpenRouterRequest(endpoint, opts) {
+  const req = buildOpenAIRequest(endpoint, opts);
+  req.headers['HTTP-Referer'] = 'https://github.com/the-reef';
+  req.headers['X-Title'] = 'The Reef';
+  return req;
+}
+
+module.exports = { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request, buildOpenRouterRequest };

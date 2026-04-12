@@ -23,10 +23,11 @@ function db() { return rightBrain.getDb(); }
 // Also creates a right-brain graph node for the item so consolidation can embed it.
 // args: { personaId, content, salience?, highSalience? }
 
-async function write({ personaId, persona_id, content, salience = 0.5, highSalience = false, high_salience } = {}) {
+async function write({ personaId, persona_id, content, salience = 0.5, highSalience = false, high_salience, leftBy, left_by } = {}) {
   // Accept both camelCase and snake_case variants (small models often generate snake_case)
   personaId    = personaId    ?? persona_id;
   highSalience = highSalience ?? high_salience ?? false;
+  leftBy       = leftBy       ?? left_by       ?? null;
   if (!personaId) throw new Error('working_memory.write: personaId is required');
   if (!content)   throw new Error('working_memory.write: content is required');
 
@@ -64,9 +65,9 @@ async function write({ personaId, persona_id, content, salience = 0.5, highSalie
   const expiresAt = Math.floor(Date.now() / 1000) + WORKING_MEMORY_TTL_SEC;
 
   d.prepare(`
-    INSERT INTO working_memory (id, persona_id, content, salience, high_sal, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, personaId, content, salience, highSalience ? 1 : 0, expiresAt);
+    INSERT INTO working_memory (id, persona_id, left_by, content, salience, high_sal, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, personaId, leftBy, content, salience, highSalience ? 1 : 0, expiresAt);
 
   // Register as a right-brain node so consolidation can embed + cluster it.
   // Fire-and-forget — non-fatal if right-brain isn't ready yet.

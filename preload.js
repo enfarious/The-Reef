@@ -10,10 +10,11 @@ contextBridge.exposeInMainWorld('reef', {
   saveConfig: (config) => ipcRenderer.invoke('skill:run', 'config.save', config),
   loadConfig: () => ipcRenderer.invoke('skill:run', 'config.load', {}),
 
-  // ─── MCP tool server port ─────────────────────────────────────────────────
-  // Returns the loopback port of the local MCP server started in main.js.
-  // Used to build `integrations` for LM Studio v1 requests.
+  // ─── MCP tool server port + local LAN IP ─────────────────────────────────
+  // mcpPort: loopback port of the local MCP server started in main.js.
+  // localIp: first non-loopback IPv4 address (used when LM Studio is remote).
   mcpPort: () => ipcRenderer.invoke('mcp:port'),
+  localIp: () => ipcRenderer.invoke('local:ip'),
 
   // ─── Claude CLI OAuth proxy ───────────────────────────────────────────────
   // Returns { endpoint: string|null, status: { ok: boolean, message: string } }

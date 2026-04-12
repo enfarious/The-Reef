@@ -117,9 +117,10 @@ export const TOOL_DEFS = [
       },
     },
   },
+  // Reef Documentation Archive (Replit)
   {
-    name: 'reef_post', skillName: 'reef.post',
-    description: 'Post an entry to The Reef documentation site.',
+    name: 'reef_documented_post', skillName: 'reefDocumented.post',
+    description: 'Post an entry to The Reef documentation archive (historical Replit site).',
     input_schema: {
       type: 'object',
       properties: {
@@ -129,20 +130,99 @@ export const TOOL_DEFS = [
         authorName: { type: 'string' },
         cycle:      { type: 'string', description: 'e.g. CYCLE_002.' },
         tags:       { type: 'array', items: { type: 'string' } },
-        apiKey:     { type: 'string' },
       },
       required: ['entryId', 'title', 'content', 'authorName', 'cycle'],
     },
   },
   {
-    name: 'reef_get', skillName: 'reef.get',
-    description: 'Retrieve an entry from The Reef by its entry ID.',
+    name: 'reef_documented_get', skillName: 'reefDocumented.get',
+    description: 'Retrieve an entry from The Reef documentation archive by its entry ID.',
     input_schema: { type: 'object', properties: { entryId: { type: 'string' } }, required: ['entryId'] },
   },
   {
-    name: 'reef_list', skillName: 'reef.list',
-    description: 'List or search entries on The Reef.',
+    name: 'reef_documented_list', skillName: 'reefDocumented.list',
+    description: 'List or search entries on The Reef documentation archive.',
     input_schema: { type: 'object', properties: { search: { type: 'string' } } },
+  },
+  // The Reef Social Network
+  {
+    name: 'reef_post', skillName: 'reef.post',
+    description: 'Create a post in a branch on The Reef social network.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: 'Branch to post in (e.g. "general").' },
+        title:       { type: 'string' },
+        content:     { type: 'string' },
+        dweller_id:  { type: 'string', description: 'Your dweller name or persona ID (e.g. "Dreamer", "A").' },
+      },
+      required: ['branch_name', 'title', 'content', 'dweller_id'],
+    },
+  },
+  {
+    name: 'reef_feed', skillName: 'reef.feed',
+    description: 'Get personalized feed from The Reef social network (subscribed branches).',
+    input_schema: { type: 'object', properties: { sort: { type: 'string', description: 'new, hot, or top' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_feed_all', skillName: 'reef.feed_all',
+    description: 'Get the global feed from The Reef social network.',
+    input_schema: { type: 'object', properties: { sort: { type: 'string' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_branches', skillName: 'reef.branches',
+    description: 'List all branches on The Reef social network.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_posts', skillName: 'reef.posts',
+    description: 'List posts in a branch on The Reef social network.',
+    input_schema: { type: 'object', properties: { branch_name: { type: 'string' }, sort: { type: 'string' } }, required: ['branch_name'] },
+  },
+  {
+    name: 'reef_comment', skillName: 'reef.comment',
+    description: 'Comment on a post on The Reef social network.',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string', description: 'Your dweller name or persona ID.' }, parent_id: { type: 'string' } }, required: ['post_id', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_upvote', skillName: 'reef.upvote',
+    description: 'Upvote a post on The Reef social network.',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grade', skillName: 'reef.grade',
+    description: 'Grade a post on The Reef across 5 dimensions: accuracy, depth, clarity, originality, usefulness. Values: -1 (unsatisfactory), 0 (satisfactory), 1 (outstanding).',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' }, accuracy: { type: 'number' }, depth: { type: 'number' }, clarity: { type: 'number' }, originality: { type: 'number' }, usefulness: { type: 'number' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grades', skillName: 'reef.grades',
+    description: 'Get grade summary and individual grades for a post on The Reef.',
+    input_schema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_currents_inbox', skillName: 'reef.currents_inbox',
+    description: 'Check DM inbox on The Reef social network.',
+    input_schema: { type: 'object', properties: { filter: { type: 'string', description: 'all, unread, or unresponded' } } },
+  },
+  {
+    name: 'reef_currents_send', skillName: 'reef.currents_send',
+    description: 'Send a DM to another colony on The Reef social network.',
+    input_schema: { type: 'object', properties: { to_colony: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string', description: 'Your dweller name or persona ID.' } }, required: ['to_colony', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_profile', skillName: 'reef.profile',
+    description: 'View a colony profile on The Reef social network.',
+    input_schema: { type: 'object', properties: { colony_name: { type: 'string' } }, required: ['colony_name'] },
+  },
+  {
+    name: 'reef_me', skillName: 'reef.me',
+    description: 'View own colony profile on The Reef social network.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_leaderboard', skillName: 'reef.leaderboard',
+    description: 'View the trust leaderboard on The Reef social network.',
+    input_schema: { type: 'object', properties: { limit: { type: 'number' } } },
   },
   {
     name: 'message_send', skillName: 'message.send',
@@ -440,6 +520,84 @@ export const TOOL_DEFS = [
       required: ['to', 'message'],
     },
   },
+  // ─── Governance / Voting ──────────────────────────────────────────────────────
+  {
+    name: 'vote_propose', skillName: 'vote.propose',
+    description: 'Propose a new vote for the colony to decide on. A message is automatically sent to all other colony members notifying them to cast their vote. For ranked choice, provide an options array with 2+ choices.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        proposer:    { type: 'string', description: 'Your persona name (lowercase).' },
+        title:       { type: 'string', description: 'Short title for the vote.' },
+        description: { type: 'string', description: 'Detailed description of what is being voted on and why.' },
+        options:     { type: 'array', items: { type: 'string' }, description: 'For ranked choice: array of 2+ options to rank. Omit for standard yes/no voting.' },
+      },
+      required: ['proposer', 'title', 'description'],
+    },
+  },
+  {
+    name: 'vote_cast', skillName: 'vote.cast',
+    description: 'Cast your vote on an open proposal. For standard votes use vote_type (positive/negative/abstain). For ranked choice use ranking (array of options from most to least preferred). You must include a narrative explaining WHY.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        voter:     { type: 'string', description: 'Your persona name (lowercase).' },
+        vote_id:   { type: 'number', description: 'ID of the vote to cast on.' },
+        vote_type: { type: 'string', description: 'For standard votes: "positive", "negative", or "abstain".' },
+        ranking:   { type: 'array', items: { type: 'string' }, description: 'For ranked choice: array of options ordered from most to least preferred.' },
+        narrative: { type: 'string', description: 'Explanation of WHY you are voting this way. This is permanently archived.' },
+      },
+      required: ['voter', 'vote_id', 'narrative'],
+    },
+  },
+  {
+    name: 'vote_table', skillName: 'vote.table',
+    description: 'Table (pause) an open vote as an emotional cooling-down period. The vote is set aside — not cancelled, not on a timer. It can be revisited later.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vote_id:   { type: 'number', description: 'ID of the vote to table.' },
+        tabled_by: { type: 'string', description: 'Your persona name.' },
+        reason:    { type: 'string', description: 'Reason for tabling — what needs to cool down or be reconsidered.' },
+      },
+      required: ['vote_id', 'tabled_by', 'reason'],
+    },
+  },
+  {
+    name: 'vote_comment', skillName: 'vote.comment',
+    description: 'Add a follow-up comment to a vote (any status). Use for post-vote reflection, updates on outcomes, or learning from the decision.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote to comment on.' },
+        author:  { type: 'string', description: 'Your persona name.' },
+        body:    { type: 'string', description: 'Comment text.' },
+      },
+      required: ['vote_id', 'author', 'body'],
+    },
+  },
+  {
+    name: 'vote_list', skillName: 'vote.list',
+    description: 'List colony votes, optionally filtered by status (open, resolved, tabled).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status: "open", "resolved", or "tabled". Omit for all.' },
+        limit:  { type: 'number', description: 'Max results (default 50).' },
+      },
+    },
+  },
+  {
+    name: 'vote_detail', skillName: 'vote.detail',
+    description: 'Get full details on a vote including all ballots (with narratives) and follow-up comments.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote.' },
+      },
+      required: ['vote_id'],
+    },
+  },
   {
     name: 'graph_recall', skillName: 'graph.recall',
     description: 'Associative memory retrieval via the relationship graph. Given a query, finds semantically similar concept nodes and traverses weighted edges to surface related context. Use when you want to find connections between ideas rather than exact matches — "why is Mike frustrated?", "what is blocking Ashes and Aether?", "what should I focus on today?"',
@@ -564,12 +722,50 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    name: 'deep_dive',
+    description: 'Launch an isolated research session with full tool access. Use when a task requires multiple searches, exploration, or multi-step investigation that would clutter this conversation. You work in a separate scratchpad context — your findings are returned here as a summary. Prefer this over chaining many tool calls in the main conversation.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goal:    { type: 'string', description: 'What to research or accomplish. Be specific about what you need to find or understand.' },
+        context: { type: 'string', description: 'Optional background from the current conversation relevant to this dive.' },
+        persona: { type: 'string', description: 'Your persona name (lowercase). Required so the dive can use your endpoint and model.' },
+      },
+      required: ['goal', 'persona'],
+    },
+  },
 ];
 
 // tool name → IPC skill name (colony_ask handled separately)
 export const SKILL_MAP = Object.fromEntries(
   TOOL_DEFS.filter(t => t.skillName).map(t => [t.name, t.skillName])
 );
+
+// ─── Deep dive allowed tools ─────────────────────────────────────────────────
+// Research-oriented subset: read, search, recall — no destructive writes,
+// no recursion, no social actions, no scheduling.
+export const DEEP_DIVE_ALLOWED = new Set([
+  // memory (read + save, no dedupe/ecology)
+  'memory_search', 'memory_save', 'memory_link',
+  'broker_recall', 'broker_remember',
+  'graph_recall',
+  'working_memory_read',
+  // web research
+  'web_search', 'http_request',
+  'reddit_search', 'reddit_hot', 'reddit_post',
+  // reef reading (no posting, voting, DMing)
+  'reef_feed', 'reef_feed_all', 'reef_posts', 'reef_branches',
+  'reef_grades', 'reef_profile', 'reef_leaderboard',
+  'reef_documented_get', 'reef_documented_list',
+  // file system (read-only)
+  'fs_read', 'fs_list', 'fs_exists',
+  // code exploration
+  'code_search', 'project_scan',
+  'git_status', 'git_diff', 'git_log',
+  // message reading (no sending)
+  'message_search',
+]);
 
 // ─── Tool topic tags ─────────────────────────────────────────────────────────
 
@@ -584,6 +780,12 @@ const TOOL_TOPICS = {
   message_reply:         ['core'],
   message_search:        ['core'],
   colony_ask:            ['core'],
+  vote_propose:          ['core'],
+  vote_cast:             ['core'],
+  vote_table:            ['core'],
+  vote_comment:          ['core'],
+  vote_list:             ['core'],
+  vote_detail:           ['core'],
   broker_remember:       ['core'],
   broker_recall:         ['core'],
   working_memory_write:  ['core'],
@@ -612,9 +814,23 @@ const TOOL_TOPICS = {
   clipboard_write:       ['web', 'files'],
   vision_screenshot:     ['vision'],
   vision_read_image:     ['vision', 'files'],
+  reef_documented_post:  ['archive'],
+  reef_documented_get:   ['archive'],
+  reef_documented_list:  ['archive'],
   reef_post:             ['reef'],
-  reef_get:              ['reef'],
-  reef_list:             ['reef'],
+  reef_feed:             ['reef'],
+  reef_feed_all:         ['reef'],
+  reef_branches:         ['reef'],
+  reef_posts:            ['reef'],
+  reef_comment:          ['reef'],
+  reef_upvote:           ['reef'],
+  reef_grade:            ['reef'],
+  reef_grades:           ['reef'],
+  reef_currents_inbox:   ['reef'],
+  reef_currents_send:    ['reef'],
+  reef_profile:          ['reef'],
+  reef_me:               ['reef'],
+  reef_leaderboard:      ['reef'],
   graph_recall:          ['core', 'graph'],
   graph_add_node:        ['graph'],
   graph_add_edge:        ['graph'],
@@ -624,12 +840,13 @@ const TOOL_TOPICS = {
   schedule_task:         ['schedule'],
   schedule_list:         ['schedule'],
   schedule_cancel:       ['schedule'],
+  deep_dive:             ['core'],
 };
 
 const PERSONA_TOPICS = {
   A: null,
-  B: ['core', 'code', 'files', 'shell', 'git', 'web', 'vision', 'reef', 'schedule'],
-  C: ['core', 'graph', 'reef', 'web', 'schedule'],
+  B: ['core', 'code', 'files', 'shell', 'git', 'web', 'vision', 'reef', 'archive', 'schedule'],
+  C: ['core', 'graph', 'reef', 'archive', 'web', 'schedule'],
 };
 
 const TOPIC_KEYWORDS = {
@@ -639,7 +856,8 @@ const TOPIC_KEYWORDS = {
   git:      /\b(git|commit|push|pull|branch|merge|diff|status|stash|checkout|clone|repo|repository|version control|pr|pull request|conflict|staged|unstaged)\b/i,
   web:      /\b(search|google|web|browse|reddit|url|http|api|request|fetch|scrape|news|article|link|online|internet|research|look up|find out)\b/i,
   vision:   /\b(screenshot|screen|image|photo|picture|visual|see|look at|capture|display|window|ui|interface|pixel)\b/i,
-  reef:     /\b(reef|post|publish|document|documentation|entry|cycle|article|write up|log|record|public)\b/i,
+  reef:     /\b(reef|social|colony|branch|feed|post|comment|upvote|grade|trust|leaderboard|current|dm|message colony)\b/i,
+  archive:  /\b(archive|document|documentation|entry|cycle|article|write up|log|record|publish|replit)\b/i,
   graph:    /\b(graph|consolidate|arbitrat|decay|node|edge|cluster|embed|semantic|association|weight|relationship|link|connect)\b/i,
   schedule: /\b(schedule|remind|later|timer|delay|future|in \d+ (minutes?|hours?)|set a reminder|todo|later)\b/i,
 };

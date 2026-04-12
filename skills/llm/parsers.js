@@ -39,20 +39,25 @@ function extractQwenChannels(raw) {
   if (!raw || !raw.includes('<|channel|>')) return null;
 
   const channels = {};
-  // Each channel block ends at <|end|>, <|start|>, or end of string
-  const re = /<\|channel\|>(\w+)<\|message\|>([\s\S]*?)(?=<\|end\|>|<\|start\|>|$)/g;
+  // Each channel block ends at <|end|>, <|start|>, <|start|>, another <|channel|>, or end of string.
+  // Including <|channel|> as a terminator prevents adjacent channels bleeding into each other.
+  const re = /<\|channel\|>(\w+)<\|message\|>([\s\S]*?)(?=<\|end\|>|<\|start\|>|<\|channel\|>|$)/g;
   let m;
   while ((m = re.exec(raw)) !== null) {
     channels[m[1]] = m[2].trim();
   }
 
-  // Require at least a 'final' (or 'response') channel to confirm the format.
-  // Without it we might misparse something that just happens to contain the token.
-  if (!('final' in channels) && !('response' in channels)) return null;
-
-  const text      = (channels.final    ?? channels.response ?? '').trim() || '[no response]';
+  // Extract reasoning and text from whichever channels are present.
+  // We no longer require a 'final' channel — partial streams (e.g. only an
+  // 'analysis' block mid-generation) should still be captured as reasoning
+  // rather than falling through to extractThinkTags and leaking as plain text.
+  const text      = (channels.final    ?? channels.response ?? '').trim() || null;
   const reasoning = (channels.analysis ?? channels.thinking ?? '').trim() || null;
-  return { text, reasoning };
+
+  // Need at least something recognisable to confirm this is Qwen channel format.
+  if (!text && !reasoning) return null;
+
+  return { text: text ?? '[no response]', reasoning };
 }
 
 // Unified reasoning/text extractor for OpenAI-compat responses.

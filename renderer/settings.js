@@ -45,6 +45,7 @@ const BUILTIN_TOOLS = [
   { name: 'schedule_list',    description: 'List pending scheduled tasks.' },
   { name: 'schedule_cancel',  description: 'Cancel a scheduled task.' },
   { name: 'colony_ask',        description: 'Send a question or directive to another colony member.' },
+  { name: 'deep_dive',        description: 'Launch an isolated research session. Findings return to the main conversation.' },
 ];
 
 // ─── Text color presets ───────────────────────────────────────────────────────
@@ -99,6 +100,8 @@ function buildSettings() {
   return {
     reefUrl:           val('sReefUrl'),
     reefApiKey:        val('sReefApiKey'),
+    archiveUrl:        val('sArchiveUrl'),
+    archiveApiKey:     val('sArchiveApiKey'),
     tavilyApiKey:      val('sTavilyApiKey'),
     colonyName:        val('sColonyName'),
     baseSystemPrompt:  val('sBasePrompt'),
@@ -111,7 +114,14 @@ function buildSettings() {
     contextWindow:     Math.max(512, parseInt(val('sContextWindow'),   10) || 4096),
     maxToolSteps:      Math.min(20, Math.max(1, parseInt(val('sMaxToolSteps'),   10) || 5)),
     maxThinkingTime:   Math.max(0,             parseInt(val('sMaxThinkingTime'), 10) || 0),
-    streamChat:        document.getElementById('sStreamChat')?.checked ?? false,
+    streamChat:                       document.getElementById('sStreamChat')?.checked ?? false,
+    defaultHeartbeatPrompt:          val('sDefaultHeartbeatPrompt'),
+    dreamInterval:     Math.max(1, parseFloat(val('sDreamInterval')) || 4),
+    dreamCoils:        Math.max(1, Math.min(5, parseInt(val('sDreamCoils'), 10) || 2)),
+    dreamTopics:       parseDreamTopics(),
+    dreamStageAPrompt: val('sDreamStageAPrompt'),
+    dreamStageBPrompt: val('sDreamStageBPrompt'),
+    dreamStageCPrompt: val('sDreamStageCPrompt'),
     toolStates:        s.toolStates  || {},
     customTools:       s.customTools || [],
     cwd:               s.cwd         || null,
@@ -119,6 +129,12 @@ function buildSettings() {
 }
 
 function val(id) { return document.getElementById(id)?.value ?? ''; }
+
+function parseDreamTopics() {
+  const raw = val('sDreamTopics').trim();
+  if (!raw) return [];
+  return raw.split('\n').map(t => t.trim()).filter(Boolean);
+}
 
 function buildDatabaseSettings() {
   return {
@@ -142,10 +158,19 @@ function populate(cfg) {
   set('sMaxThinkingTime',   s.maxThinkingTime   ?? 120);
   set('sReefUrl',           s.reefUrl           || '');
   set('sReefApiKey',        s.reefApiKey        || '');
+  set('sArchiveUrl',        s.archiveUrl        || '');
+  set('sArchiveApiKey',     s.archiveApiKey     || '');
   set('sTavilyApiKey',      s.tavilyApiKey      || '');
   set('sOperatorName',      s.operatorName      || '');
   set('sOperatorBirthdate', s.operatorBirthdate || '');
   set('sOperatorAbout',     s.operatorAbout     || '');
+  set('sDefaultHeartbeatPrompt',          s.defaultHeartbeatPrompt          || '');
+  set('sDreamInterval',       s.dreamInterval       || 4);
+  set('sDreamCoils',          s.dreamCoils          || 2);
+  set('sDreamTopics',          (s.dreamTopics || []).join('\n'));
+  set('sDreamStageAPrompt',   s.dreamStageAPrompt   || '');
+  set('sDreamStageBPrompt',   s.dreamStageBPrompt   || '');
+  set('sDreamStageCPrompt',   s.dreamStageCPrompt   || '');
   setFontScale(s.fontScale  || 100);
   buildColorPalette(s.fontColors || 'cool');
   setStreamChat(s.streamChat ?? false);
@@ -328,14 +353,28 @@ function flash(el) {
 
 // ─── Field change listeners ───────────────────────────────────────────────────
 
-['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sTavilyApiKey',
- 'sOperatorName', 'sOperatorBirthdate', 'sOperatorAbout'].forEach(id => {
-  document.getElementById(id).addEventListener('input', scheduleSave);
+['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sArchiveUrl', 'sArchiveApiKey', 'sTavilyApiKey',
+ 'sOperatorName', 'sOperatorBirthdate', 'sOperatorAbout',
+ 'sDefaultHeartbeatPrompt',
+ 'sDreamStageAPrompt', 'sDreamStageBPrompt', 'sDreamStageCPrompt'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', scheduleSave);
 });
 
 document.getElementById('sHeartbeatInterval').addEventListener('change', e => {
   const mins = Math.max(5, parseInt(e.target.value, 10) || 60);
   e.target.value = mins;
+  scheduleSave();
+});
+
+document.getElementById('sDreamInterval')?.addEventListener('change', e => {
+  const hours = Math.max(1, parseFloat(e.target.value) || 4);
+  e.target.value = hours;
+  scheduleSave();
+});
+
+document.getElementById('sDreamCoils')?.addEventListener('change', e => {
+  const coils = Math.max(1, Math.min(5, parseInt(e.target.value, 10) || 2));
+  e.target.value = coils;
   scheduleSave();
 });
 

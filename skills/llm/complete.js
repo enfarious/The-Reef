@@ -1,9 +1,9 @@
 'use strict';
 
-const { detectMode }          = require('./detect-mode');
+const { detectMode, normalizeModel } = require('./detect-mode');
 const { fetchJson }           = require('./http');
 const { sanitizeResponse }    = require('./sanitize');
-const { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request } = require('./request-builders');
+const { buildAnthropicRequest, buildOpenAIRequest, buildLMStudioV1Request, buildOpenRouterRequest } = require('./request-builders');
 const { parseAnthropicResponse, parseOpenAIResponse, parseLMStudioV1Response } = require('./parsers');
 
 // ─── complete ─────────────────────────────────────────────────────────────────
@@ -17,18 +17,30 @@ const { parseAnthropicResponse, parseOpenAIResponse, parseLMStudioV1Response } =
 //
 // Always returns a unified object — see parser docs above.
 
-async function complete({ endpoint, model, systemPrompt, apiKey, messages, previousResponseId, store, tools, integrations }) {
+async function complete({ endpoint, model, systemPrompt, apiKey, messages, previousResponseId, store, tools, integrations, thinking }) {
   if (!endpoint)                    throw new Error('No endpoint configured for this persona.');
-  if (endpoint === 'claude-cli')   throw new Error('Claude CLI proxy is not ready. Run "claude login" and restart the app.');
+  if (endpoint === 'claude-cli') {
+    try {
+      const proxy = require('../claude-proxy');
+      const proxyUrl = proxy.endpoint();
+      if (proxyUrl) { endpoint = proxyUrl; }
+      else { throw new Error('not running'); }
+    } catch {
+      throw new Error('Claude CLI proxy is not ready. Run "claude login" and restart the app.');
+    }
+  }
   if (!messages?.length)           throw new Error('No messages to send.');
 
+  model = normalizeModel(model);
   const mode = detectMode(endpoint);
 
   let request;
   if (mode === 'anthropic') {
-    request = buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
+    request = buildAnthropicRequest(endpoint, { model, systemPrompt, apiKey, messages, tools, thinking });
   } else if (mode === 'lmstudio-v1') {
     request = buildLMStudioV1Request(endpoint, { model, systemPrompt, apiKey, messages, previousResponseId, store, integrations });
+  } else if (mode === 'openrouter') {
+    request = buildOpenRouterRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
   } else {
     request = buildOpenAIRequest(endpoint, { model, systemPrompt, apiKey, messages, tools });
   }

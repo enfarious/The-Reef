@@ -64,6 +64,7 @@ async function inbox(args) {
        m.body,
        m.reply_to_id,
        m.created_at,
+       m.responded_at,
        -- thread context: include parent subject + snippet when available
        orig.from_persona  AS thread_from,
        orig.subject       AS thread_subject,
@@ -72,6 +73,8 @@ async function inbox(args) {
      LEFT JOIN messages orig ON orig.id = m.reply_to_id
      WHERE (m.to_persona = 'all' OR $1 = ANY(string_to_array(m.to_persona, ',')))
        AND m.is_read = FALSE
+       AND m.responded_at IS NULL
+       AND m.from_persona != $1
      ORDER BY m.created_at ASC
      LIMIT $2`,
     [normalize(persona), limit]
@@ -107,9 +110,9 @@ async function reply(args) {
     ? (original.subject.startsWith('Re: ') ? original.subject : `Re: ${original.subject}`)
     : 'Re: (no subject)';
 
-  // Mark original as read
+  // Mark original as read and responded
   await pool.query(
-    `UPDATE messages SET is_read = TRUE, read_at = NOW() WHERE id = $1`,
+    `UPDATE messages SET is_read = TRUE, read_at = NOW(), responded_at = NOW() WHERE id = $1`,
     [message_id]
   );
 
@@ -174,7 +177,7 @@ async function list(args = {}) {
   const { limit = 100, offset = 0 } = args;
   const { rows } = await pool.query(
     `SELECT id, from_persona, to_persona, subject, body,
-            reply_to_id, is_read, read_at, created_at
+            reply_to_id, is_read, read_at, responded_at, created_at
        FROM messages
       ORDER BY created_at DESC
       LIMIT $1 OFFSET $2`,

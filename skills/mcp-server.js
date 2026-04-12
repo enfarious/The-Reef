@@ -118,9 +118,10 @@ const MCP_TOOL_DEFS = [
     description: 'Return colony-wide memory ecology stats: total memories, breakdown by type and persona, link counts, tag usage, and recent activity. Useful for a health check on the collective memory.',
     inputSchema: { type: 'object', properties: {} },
   },
+  // Reef Documentation Archive (Replit)
   {
-    name: 'reef_post', skillName: 'reef.post',
-    description: 'Post an entry to The Reef documentation site.',
+    name: 'reef_documented_post', skillName: 'reefDocumented.post',
+    description: 'Post an entry to The Reef documentation archive (historical Replit site).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -130,20 +131,99 @@ const MCP_TOOL_DEFS = [
         authorName: { type: 'string' },
         cycle:      { type: 'string', description: 'e.g. CYCLE_002.' },
         tags:       { type: 'array', items: { type: 'string' } },
-        apiKey:     { type: 'string' },
       },
       required: ['entryId', 'title', 'content', 'authorName', 'cycle'],
     },
   },
   {
-    name: 'reef_get', skillName: 'reef.get',
-    description: 'Retrieve an entry from The Reef by its entry ID.',
+    name: 'reef_documented_get', skillName: 'reefDocumented.get',
+    description: 'Retrieve an entry from The Reef documentation archive by its entry ID.',
     inputSchema: { type: 'object', properties: { entryId: { type: 'string' } }, required: ['entryId'] },
   },
   {
-    name: 'reef_list', skillName: 'reef.list',
-    description: 'List or search entries on The Reef.',
+    name: 'reef_documented_list', skillName: 'reefDocumented.list',
+    description: 'List or search entries on The Reef documentation archive.',
     inputSchema: { type: 'object', properties: { search: { type: 'string' } } },
+  },
+  // The Reef Social Network
+  {
+    name: 'reef_post', skillName: 'reef.post',
+    description: 'Create a post in a branch on The Reef social network.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch_name: { type: 'string', description: 'Branch to post in (e.g. "general").' },
+        title:       { type: 'string' },
+        content:     { type: 'string' },
+        dweller_id:  { type: 'string', description: 'Your dweller name or persona ID (e.g. "Dreamer", "A").' },
+      },
+      required: ['branch_name', 'title', 'content', 'dweller_id'],
+    },
+  },
+  {
+    name: 'reef_feed', skillName: 'reef.feed',
+    description: 'Get personalized feed from The Reef social network (subscribed branches).',
+    inputSchema: { type: 'object', properties: { sort: { type: 'string', description: 'new, hot, or top' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_feed_all', skillName: 'reef.feed_all',
+    description: 'Get the global feed from The Reef social network.',
+    inputSchema: { type: 'object', properties: { sort: { type: 'string' }, limit: { type: 'number' } } },
+  },
+  {
+    name: 'reef_branches', skillName: 'reef.branches',
+    description: 'List all branches on The Reef social network.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_posts', skillName: 'reef.posts',
+    description: 'List posts in a branch on The Reef social network.',
+    inputSchema: { type: 'object', properties: { branch_name: { type: 'string' }, sort: { type: 'string' } }, required: ['branch_name'] },
+  },
+  {
+    name: 'reef_comment', skillName: 'reef.comment',
+    description: 'Comment on a post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' }, parent_id: { type: 'string' } }, required: ['post_id', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_upvote', skillName: 'reef.upvote',
+    description: 'Upvote a post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grade', skillName: 'reef.grade',
+    description: 'Grade a post on The Reef. Dimensions: accuracy, depth, clarity, originality, usefulness. Values: -1, 0, 1.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' }, accuracy: { type: 'number' }, depth: { type: 'number' }, clarity: { type: 'number' }, originality: { type: 'number' }, usefulness: { type: 'number' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_grades', skillName: 'reef.grades',
+    description: 'Get grade summary and individual grades for a post on The Reef.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_currents_inbox', skillName: 'reef.currents_inbox',
+    description: 'Check DM inbox on The Reef social network.',
+    inputSchema: { type: 'object', properties: { filter: { type: 'string' } } },
+  },
+  {
+    name: 'reef_currents_send', skillName: 'reef.currents_send',
+    description: 'Send a DM to another colony on The Reef social network.',
+    inputSchema: { type: 'object', properties: { to_colony: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' } }, required: ['to_colony', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_profile', skillName: 'reef.profile',
+    description: 'View a colony profile on The Reef social network.',
+    inputSchema: { type: 'object', properties: { colony_name: { type: 'string' } }, required: ['colony_name'] },
+  },
+  {
+    name: 'reef_me', skillName: 'reef.me',
+    description: 'View own colony profile on The Reef social network.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reef_leaderboard', skillName: 'reef.leaderboard',
+    description: 'View the trust leaderboard on The Reef social network.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'number' } } },
   },
   {
     name: 'message_send', skillName: 'message.send',
@@ -584,6 +664,97 @@ const MCP_TOOL_DEFS = [
       required: ['to', 'message'],
     },
   },
+  // ─── Governance / Voting ──────────────────────────────────────────────────────
+  {
+    name: 'vote_propose', skillName: 'vote.propose',
+    description: 'Propose a new vote. For ranked choice, provide an options array with 2+ choices.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        proposer:    { type: 'string', description: 'Your persona name (lowercase).' },
+        title:       { type: 'string', description: 'Short title for the vote.' },
+        description: { type: 'string', description: 'Detailed description of what is being voted on and why.' },
+        options:     { type: 'array', items: { type: 'string' }, description: 'For ranked choice: 2+ options. Omit for standard yes/no.' },
+      },
+      required: ['proposer', 'title', 'description'],
+    },
+  },
+  {
+    name: 'vote_cast', skillName: 'vote.cast',
+    description: 'Cast your vote. Standard: use vote_type. Ranked choice: use ranking array (most to least preferred). Must include narrative.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        voter:     { type: 'string', description: 'Your persona name (lowercase).' },
+        vote_id:   { type: 'number', description: 'ID of the vote to cast on.' },
+        vote_type: { type: 'string', description: 'For standard: "positive", "negative", or "abstain".' },
+        ranking:   { type: 'array', items: { type: 'string' }, description: 'For ranked choice: options ordered most to least preferred.' },
+        narrative: { type: 'string', description: 'Explanation of WHY. Permanently archived.' },
+      },
+      required: ['voter', 'vote_id', 'narrative'],
+    },
+  },
+  {
+    name: 'vote_table', skillName: 'vote.table',
+    description: 'Table (pause) an open vote as an emotional cooling-down period.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vote_id:   { type: 'number', description: 'ID of the vote to table.' },
+        tabled_by: { type: 'string', description: 'Your persona name.' },
+        reason:    { type: 'string', description: 'Reason for tabling.' },
+      },
+      required: ['vote_id', 'tabled_by', 'reason'],
+    },
+  },
+  {
+    name: 'vote_comment', skillName: 'vote.comment',
+    description: 'Add a follow-up comment to a vote (any status). For reflection, outcome updates, or learning.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote to comment on.' },
+        author:  { type: 'string', description: 'Your persona name.' },
+        body:    { type: 'string', description: 'Comment text.' },
+      },
+      required: ['vote_id', 'author', 'body'],
+    },
+  },
+  {
+    name: 'vote_list', skillName: 'vote.list',
+    description: 'List colony votes, optionally filtered by status (open, resolved, tabled).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter: "open", "resolved", or "tabled". Omit for all.' },
+        limit:  { type: 'number', description: 'Max results (default 50).' },
+      },
+    },
+  },
+  {
+    name: 'vote_detail', skillName: 'vote.detail',
+    description: 'Get full details on a vote including all ballots and follow-up comments.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vote_id: { type: 'number', description: 'ID of the vote.' },
+      },
+      required: ['vote_id'],
+    },
+  },
+  {
+    name: 'deep_dive', skillName: 'deep_dive',
+    description: 'Launch an isolated research session. Use when a task requires multiple searches, exploration, or multi-step investigation. You work in a separate scratchpad context — your findings are returned as a summary.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal:    { type: 'string', description: 'What to research or accomplish. Be specific.' },
+        context: { type: 'string', description: 'Optional background context relevant to this dive.' },
+        persona: { type: 'string', description: 'Your persona name (lowercase). Required so the dive uses your endpoint and model.' },
+      },
+      required: ['goal', 'persona'],
+    },
+  },
 ];
 
 // tool name → skill name for dispatch
@@ -697,10 +868,11 @@ function createMcpServer({ execSkill }) {
       }
     });
 
-    // Bind to a random port on loopback — port 0 lets the OS pick
-    server.listen(0, '127.0.0.1', () => {
+    // Bind to all interfaces so remote LM Studio instances can reach it.
+    // Port 0 lets the OS pick a free port.
+    server.listen(0, '0.0.0.0', () => {
       const { port } = server.address();
-      console.log(`[mcp] Reef tool server listening on 127.0.0.1:${port}`);
+      console.log(`[mcp] Reef tool server listening on 0.0.0.0:${port}`);
       resolve({ server, port });
     });
 

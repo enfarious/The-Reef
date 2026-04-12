@@ -16,7 +16,7 @@ import {
   COMPACT_PROMPT, updateContextCounter, buildOperatorSection,
   buildWorkspaceSection, buildSessionSection, scanProject, updateCwdDisplay, personaHasApiAccess,
 } from './lib/context.js';
-import { setHeartbeatCallbacks, runHeartbeatFor, startHeartbeat, HEARTBEAT_PROMPT } from './lib/heartbeat.js';
+import { setHeartbeatCallbacks, runHeartbeatFor, runDreamCycle, startHeartbeat, startDreams, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
 import { parseAtMentions }                                     from './lib/mentions.js';
 import { TOOL_DEFS, contextualToolDefs, detectModeClient }     from './lib/tools.js';
 import {
@@ -28,10 +28,11 @@ import {
 import { setToolExecCallbacks, executeTool }                   from './lib/tool-exec.js';
 import { setSchedulerCallbacks }                               from './lib/scheduler.js';
 import {
-  openEntitySettings, openReefPost,
+  openEntitySettings,
   initConfirmModal, initEntitySettingsListeners,
   openAgentPicker, initAgentPickerListeners,
 } from './lib/modals.js';
+import { tenderFlush, tenderPrePrompt, tenderPostResponse, tenderConsult, tenderRecordFeedback } from './lib/tender.js';
 
 // ─── Per-persona message queue ───────────────────────────────────────────────
 const messageQueue = { A: [], B: [], C: [] };
@@ -71,6 +72,7 @@ async function sendMessage() {
       (async () => {
         await maybeAutoCompact(id);
         appendUserMsg(id, raw, cleanText);
+        await tenderPrePrompt(id, cleanText);
         sendToPersona(id).finally(() => drainMessageQueue(id));
       })();
     }
@@ -93,6 +95,8 @@ async function compactPersona(id) {
   if (state.thinking[id]) return;
   const count = state.conversations[id].length;
   if (!count) return;
+  
+  await tenderFlush(id);
 
   state.conversations[id].push({ _id: uid(), role: 'user', content: COMPACT_PROMPT });
 
@@ -117,10 +121,16 @@ async function compactPersona(id) {
 
 // ─── Tool-use loop — main orchestrator ───────────────────────────────────────
 
-async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null } = {}) {
-  if (state.thinking[id]) return;
+async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null, returnOutput = false } = {}) {
+  if (state.thinking[id]) return returnOutput ? '' : undefined;
+  let _accumulatedOutput = '';
 
-  const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointEl = document.getElementById(`endpoint-${id}`);
+  let   endpoint   = endpointEl.value.trim();
+  if (!endpoint && endpointEl.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointEl.value = endpoint;
+  }
   const mode     = detectModeClient(endpoint);
 
   const useTools = mode !== 'lmstudio-v1';
@@ -136,10 +146,14 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       .map(t => t.name);
 
     if (enabledMcpTools.length) {
+      // If LM Studio is on a remote host it can't reach our loopback — use LAN IP.
+      const endpointHost = (() => { try { return new URL(endpoint).hostname; } catch { return 'localhost'; } })();
+      const isRemote = endpointHost !== 'localhost' && endpointHost !== '127.0.0.1';
+      const mcpHost = isRemote ? (state.localIp || '127.0.0.1') : '127.0.0.1';
       v1Integrations = [{
         type:          'ephemeral_mcp',
         server_label:  'reef',
-        server_url:    `http://127.0.0.1:${state.mcpPort}`,
+        server_url:    `http://${mcpHost}:${state.mcpPort}`,
         allowed_tools: enabledMcpTools,
       }];
     }
@@ -147,7 +161,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
 
   const useStreaming = state.config.settings.streamChat === true;
 
-  const localMessages = isHeartbeat ? [{ role: 'user', content: heartbeatPrompt || HEARTBEAT_PROMPT }] : null;
+  const localMessages = isHeartbeat ? [{ role: 'user', content: heartbeatPrompt || DEFAULT_HEARTBEAT_PROMPT }] : null;
 
   const callOpts = isHeartbeat
     ? { messages: localMessages, previousResponseId: undefined,
@@ -174,6 +188,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       setThinking(id, false);
       if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
+      if (returnOutput) return _accumulatedOutput.trim();
       return;
     }
 
@@ -201,6 +216,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
       }
 
       if (text?.trim()) {
+        if (returnOutput) _accumulatedOutput += text;
         const msgId = uid();
         let aDiv;
         if (result._bubble) {
@@ -216,10 +232,18 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
         result._bubble.remove();
       }
 
+      if (text?.trim() && !isHeartbeat) {
+        tenderPostResponse(id, text);   // ← fire and forget, no await needed
+        // Consult The Tender — update hearth light with signal
+        const signal = tenderConsult(text, id);
+        updateHearthLight(signal.warmth);
+      }
+
       clearToolAccumulator(id);
       setThinking(id, false);
       if (!isHeartbeat) state.lastActivity[id] = Date.now();
       updateContextCounter(id);
+      if (returnOutput) return _accumulatedOutput.trim();
       return;
     }
 
@@ -227,6 +251,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
     if (result._bubble) {
       adoptBubbleAsAccumulator(id, result._bubble);
     } else if (text?.trim()) {
+      if (returnOutput) _accumulatedOutput += text;
       appendToolTextMsg(id, text);
     }
 
@@ -339,8 +364,15 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null }
 // ─── Single LLM call ─────────────────────────────────────────────────────────
 
 async function callPersonaOnce(id, tools = [], integrations = undefined, opts = {}) {
-  const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointEl   = document.getElementById(`endpoint-${id}`);
+  let   endpoint     = endpointEl.value.trim();
+  // Resolve empty claude-cli endpoints to the live proxy URL
+  if (!endpoint && endpointEl.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointEl.value = endpoint;
+  }
   const model        = document.getElementById(`model-${id}`).value;
+  console.log(`[callPersonaOnce] ${id} → endpoint=${endpoint} claudeCli=${endpointEl.dataset.claudeCli}`);
   const entityPrompt = (state.config[id].systemPrompt || '').trim();
   const basePrompt   = (state.config.settings.baseSystemPrompt || '').trim();
 
@@ -365,10 +397,13 @@ async function callPersonaOnce(id, tools = [], integrations = undefined, opts = 
   await acquireLlmSlot();
   let response;
   try {
+    const thinking = detectModeClient(endpoint) === 'anthropic'
+      ? { type: 'enabled', budget_tokens: 10000 } : undefined;
     response = await window.reef.invoke('llm.complete', {
       endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
       tools:        tools.length  ? tools        : undefined,
       integrations: integrations  ? integrations : undefined,
+      thinking,
       ...(opts.store === false ? { store: false } : {}),
     });
   } finally {
@@ -385,8 +420,15 @@ async function callPersonaOnce(id, tools = [], integrations = undefined, opts = 
 // ─── Streaming single LLM call ──────────────────────────────────────────────
 
 async function callPersonaStream(id, tools = [], integrations = undefined, opts = {}) {
-  const endpoint     = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointEl   = document.getElementById(`endpoint-${id}`);
+  let   endpoint     = endpointEl.value.trim();
+  // Resolve empty claude-cli endpoints to the live proxy URL
+  if (!endpoint && endpointEl.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointEl.value = endpoint;
+  }
   const model        = document.getElementById(`model-${id}`).value;
+  console.log(`[callPersonaStream] ${id} → endpoint=${endpoint} claudeCli=${endpointEl.dataset.claudeCli}`);
   const entityPrompt = (state.config[id].systemPrompt || '').trim();
   const basePrompt   = (state.config.settings.baseSystemPrompt || '').trim();
 
@@ -573,10 +615,13 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
   await acquireLlmSlot();
   let response;
   try {
+    const thinking = detectModeClient(endpoint) === 'anthropic'
+      ? { type: 'enabled', budget_tokens: 10000 } : undefined;
     response = await window.reef.streamLLM(streamId, {
       endpoint, model, systemPrompt, apiKey, messages, previousResponseId,
       tools:        tools.length  ? tools        : undefined,
       integrations: integrations  ? integrations : undefined,
+      thinking,
       ...(opts.store === false ? { store: false } : {}),
     });
   } finally {
@@ -601,7 +646,13 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
 // ─── Model refresh ───────────────────────────────────────────────────────────
 
 async function refreshModels(id) {
-  const endpoint = document.getElementById(`endpoint-${id}`).value.trim();
+  const endpointInput = document.getElementById(`endpoint-${id}`);
+  let endpoint = endpointInput.value.trim();
+  // If the input is empty but marked as claude-cli, resolve from proxy info
+  if (!endpoint && endpointInput.dataset.claudeCli === '1' && state.claudeProxyEndpoint) {
+    endpoint = state.claudeProxyEndpoint;
+    endpointInput.value = endpoint;
+  }
   const apiKey   = document.getElementById(`apikey-${id}`).value.trim()
     || document.getElementById('globalApiKey').value.trim();
   const btn      = document.querySelector(`[data-persona-refresh="${id}"]`);
@@ -674,6 +725,8 @@ async function wakePersona(id) {
   const personaName = state.config[id].name || persona.name;
   const msgs = document.getElementById(`msgs-${id}`);
   const empty = document.getElementById(`empty-${id}`);
+  await tenderFlush(id);
+  
   if (empty) empty.style.display = 'none';
 
   const wakeBtn = document.querySelector(`[data-persona-wake="${id}"]`);
@@ -838,16 +891,12 @@ document.addEventListener('click', e => {
     openEntitySettings(e.target.dataset.entitySettings, e.target);
   }
 
-  if (e.target.matches('[data-persona-post]')) {
-    openReefPost(e.target.dataset.personaPost);
-  }
-
   if (e.target.matches('[data-persona-wake]')) {
     wakePersona(e.target.dataset.personaWake);
   }
 
   if (e.target.matches('[data-persona-pulse]')) {
-    runHeartbeatFor(e.target.dataset.personaPulse);
+    runHeartbeatFor(e.target.dataset.personaPulse, { manual: true });
   }
 
   if (e.target.matches('[data-persona-fold]')) {
@@ -905,10 +954,9 @@ window.reef.onConfigUpdated(cfg => {
   if (cfg.settings.fontScale  !== undefined) applyFontScale(cfg.settings.fontScale);
   if (cfg.settings.fontColors !== undefined) applyTextColors(cfg.settings.fontColors);
   applyColonyName(state.config.settings.colonyName);
-  if (cfg.settings.heartbeatInterval !== undefined &&
-      cfg.settings.heartbeatInterval !== prev) {
-    startHeartbeat();
-  }
+  // Restart heartbeat + dream schedulers on settings change
+  startHeartbeat();
+  startDreams();
   if (cfg.settings.cwd !== undefined) {
     const newCwd = cfg.settings.cwd || null;
     if (newCwd !== state.cwd) {
@@ -929,6 +977,15 @@ document.getElementById('userInput').addEventListener('keydown', e => {
     sendMessage();
   }
 });
+
+// ─── Hearth Light — The Tender's ambient UI signal ──────────────────────────
+
+function updateHearthLight(warmth) {
+  const el = document.getElementById('hearthLight');
+  if (!el) return;
+  el.classList.remove('hearth-warm', 'hearth-cool', 'hearth-neutral');
+  el.classList.add(`hearth-${warmth}`);
+}
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -951,13 +1008,18 @@ async function init() {
   initEntitySettingsListeners();
   initAgentPickerListeners();
 
-  // Start heartbeat
+  // Start heartbeat + dream schedulers
   startHeartbeat();
+  startDreams();
 
-  // Fetch MCP server port
+  // Fetch MCP server port + local LAN IP (for remote LM Studio integrations)
   window.reef.mcpPort().then(port => {
     state.mcpPort = port;
     if (port) console.log(`[renderer] MCP server available on port ${port}`);
+  }).catch(() => {});
+  window.reef.localIp().then(ip => {
+    state.localIp = ip;
+    console.log(`[renderer] Local LAN IP: ${ip}`);
   }).catch(() => {});
 
   // Fetch Claude CLI proxy info
@@ -1054,8 +1116,26 @@ async function init() {
   // Inspector window buttons
   document.getElementById('openMemoryBrowser').onclick = () => window.reef.openWindow('memory-browser');
   document.getElementById('openMessages').onclick      = () => window.reef.openWindow('messages');
+  document.getElementById('openReefNetwork').onclick   = () => window.reef.openWindow('reef-network');
   document.getElementById('openArchive').onclick       = () => window.reef.openWindow('archive');
+  document.getElementById('openVotes').onclick         = () => window.reef.openWindow('votes');
+  document.getElementById('openDreams').onclick        = () => window.reef.openWindow('dreams');
   document.getElementById('openVisualizer').onclick    = () => window.reef.openWindow('visualizer');
+
+  // ─── Governance pulse check ───────────────────────────────────────────────────
+  async function checkOpenVotes() {
+    try {
+      const result = await window.reef.invoke('vote.list', { status: 'open', limit: 1 });
+      const btn = document.getElementById('openVotes');
+      if (result.ok && result.result && result.result.length > 0) {
+        btn.classList.add('vote-flash');
+      } else {
+        btn.classList.remove('vote-flash');
+      }
+    } catch { /* silent */ }
+  }
+  setInterval(checkOpenVotes, 30_000);
+  setTimeout(checkOpenVotes, 5_000); // first check after settle
 
   // Load saved config
   const saved = await window.reef.loadConfig();

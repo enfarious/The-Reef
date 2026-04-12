@@ -13,7 +13,7 @@ const TOOL_CATEGORIES = {
   'Filesystem':  ['fs_read', 'fs_write', 'fs_delete', 'fs_list', 'fs_exists'],
   'Code & Git':  ['code_search', 'project_scan', 'shell_run', 'git_status', 'git_diff', 'git_log', 'git_commit', 'git_branch', 'git_push'],
   'Memory':      ['memory_save', 'memory_search', 'memory_link', 'ecology_monitor', 'memory_dedupe', 'broker_remember', 'broker_recall', 'graph_recall', 'graph_add_node', 'graph_add_edge', 'graph_consolidate', 'graph_arbitrate', 'graph_decay_pass', 'working_memory_write', 'working_memory_read'],
-  'Colony':      ['message_send', 'message_inbox', 'message_reply', 'message_search', 'colony_ask'],
+  'Colony':      ['message_send', 'message_inbox', 'message_reply', 'message_search', 'colony_ask', 'vote_propose', 'vote_cast', 'vote_table', 'vote_comment', 'vote_list', 'vote_detail'],
   'Reef & Web':  ['reef_post', 'reef_get', 'reef_list', 'web_search', 'http_request', 'reddit_search', 'reddit_hot', 'reddit_post'],
   'System':      ['clipboard_read', 'clipboard_write', 'vision_screenshot', 'vision_read_image', 'notify', 'schedule_task', 'schedule_list', 'schedule_cancel'],
 };
@@ -63,7 +63,10 @@ export function openEntitySettings(personaId, triggerEl) {
   document.getElementById('entityName').value         = cfg.name  || p.name;
   document.getElementById('entityRole').value         = cfg.role  || p.role;
   document.getElementById('entityMemoryDepth').value  = cfg.memoryDepth != null ? cfg.memoryDepth : 10;
-  document.getElementById('entityHeartbeat').checked  = cfg.heartbeat !== false;
+  document.getElementById('entityHeartbeat').checked      = cfg.heartbeat !== false;
+  document.getElementById('entityDreamProducer').checked   = cfg.dreamProducer === true;
+  document.getElementById('entityDreamReceiver').checked   = cfg.dreamReceiver !== false;
+  document.getElementById('entityHeartbeatPrompt').value   = cfg.heartbeatPrompt || '';
   document.getElementById('entityReefApiKey').value   = cfg.reefApiKey || '';
   document.getElementById('entitySystemPrompt').value = cfg.systemPrompt || p.systemPrompt || '';
 
@@ -113,100 +116,6 @@ export function closeEntitySettings() {
   entitySettingsPersonaId = null;
 }
 
-// ─── Reef post modal ─────────────────────────────────────────────────────────
-
-export function openReefPost(personaId) {
-  const lastMsg = [...state.conversations[personaId]].reverse().find(m => m.role === 'assistant');
-  if (!lastMsg) {
-    appendError(personaId, 'No assistant message to post yet.');
-    return;
-  }
-
-  const persona     = PERSONAS.find(p => p.id === personaId);
-  const personaName = state.config[personaId].name || persona.name;
-  const cycle = 'CYCLE_' + (document.getElementById('cycleNumber').value.trim() || '001');
-  const defaultTitle = `${personaName} — ${new Date().toISOString().slice(0, 10)}`;
-
-  const titleEl   = document.getElementById('reefTitle');
-  const entryIdEl = document.getElementById('reefEntryId');
-  const cycleEl   = document.getElementById('reefCycle');
-  const tagsEl    = document.getElementById('reefTags');
-  const apiKeyEl  = document.getElementById('reefApiKeyModal');
-  const previewEl = document.getElementById('reefPreview');
-  const statusEl  = document.getElementById('reefPostStatus');
-
-  titleEl.value   = defaultTitle;
-  entryIdEl.value = slugify(defaultTitle);
-  cycleEl.value   = cycle;
-  tagsEl.value    = [personaName.toLowerCase(), 'colony'].join(', ');
-  apiKeyEl.value  = state.config[personaId].reefApiKey
-    || state.config.settings.reefApiKey
-    || '';
-  previewEl.textContent = lastMsg.content.slice(0, 300) + (lastMsg.content.length > 300 ? '…' : '');
-  statusEl.textContent  = '';
-
-  titleEl.oninput = () => {
-    entryIdEl.value = slugify(titleEl.value);
-  };
-
-  const overlay = document.getElementById('reefPostOverlay');
-  overlay.style.display = 'flex';
-
-  document.getElementById('reefPostCancel').onclick = () => {
-    overlay.style.display = 'none';
-  };
-
-  document.getElementById('reefPostSubmit').onclick = async () => {
-    const apiKey  = apiKeyEl.value.trim();
-    const title   = titleEl.value.trim();
-    const entryId = entryIdEl.value.trim();
-    const cyclVal = cycleEl.value.trim();
-    const tags    = tagsEl.value.split(',').map(t => t.trim()).filter(Boolean);
-
-    if (!title || !entryId || !cyclVal) {
-      statusEl.textContent = 'Title, entry ID, and cycle are required.';
-      statusEl.style.color = 'rgba(255,100,100,0.8)';
-      return;
-    }
-
-    statusEl.textContent = 'Posting…';
-    statusEl.style.color = 'var(--text-dim)';
-
-    const result = await window.reef.invoke('reef.post', {
-      entryId,
-      title,
-      content: lastMsg.content,
-      authorName: personaName,
-      cycle: cyclVal,
-      tags,
-      linkedIds: [],
-      apiKey,
-      baseUrl: state.config.settings.reefUrl || undefined,
-    });
-
-    if (!result.ok) {
-      statusEl.textContent = `Error: ${result.error}`;
-      statusEl.style.color = 'rgba(255,100,100,0.8)';
-      return;
-    }
-
-    if (state.config[personaId].reefApiKey) {
-      state.config[personaId].reefApiKey = apiKey;
-    } else {
-      state.config.settings.reefApiKey = apiKey;
-    }
-    scheduleSave();
-
-    overlay.style.display = 'none';
-
-    const msgs = document.getElementById(`msgs-${personaId}`);
-    const div  = document.createElement('div');
-    div.className = 'message assistant-msg';
-    div.innerHTML = `<div class="skill-indicator">✓ posted to reef — ${escHtml(entryId)}</div>`;
-    msgs.appendChild(div);
-    msgs.scrollTop = msgs.scrollHeight;
-  };
-}
 
 // ─── Confirmation modal ──────────────────────────────────────────────────────
 
@@ -255,15 +164,21 @@ export function openAgentPicker(personaId, triggerEl) {
     const dot = `<span class="agent-picker-dot" style="background:${dp.color}"></span>`;
     item.innerHTML = `${dot}<span class="agent-picker-item-name">${escHtml(dp.name)}</span><span class="agent-picker-item-role">${escHtml(dp.role)}</span>`;
     item.addEventListener('click', () => {
+      // Preserve claude-cli proxy if the column is currently using it
+      const currentInput = document.getElementById(`endpoint-${personaId}`);
+      const keepCli = currentInput && currentInput.dataset.claudeCli === '1';
       applyAgentToColumn(personaId, {
         name: '',   // empty = use default persona name
         role: '',
         color: dp.color,
         systemPrompt: dp.systemPrompt,
+        heartbeatPrompt: '',  // empty = use built-in default
         model: dp.defaultModel,
-        endpoint: dp.defaultEndpoint,
+        endpoint: keepCli ? 'claude-cli' : dp.defaultEndpoint,
         memoryDepth: 10,
         heartbeat: true,
+        dreamProducer: dp.id === 'C',   // Librarian produces by default
+        dreamReceiver: dp.id !== 'C',   // others receive by default
         tools: null,
       }, null);
       closeAgentPicker();
@@ -340,21 +255,38 @@ export function closeAgentPicker() {
 
 function applyAgentToColumn(personaId, agent, agentId) {
   const cfg = state.config[personaId];
-  cfg.activeAgent  = agentId;
-  cfg.name         = agent.name || '';
-  cfg.role         = agent.role || '';
-  cfg.color        = agent.color || '';
-  cfg.systemPrompt = agent.systemPrompt || '';
-  cfg.memoryDepth  = agent.memoryDepth != null ? agent.memoryDepth : 10;
-  cfg.heartbeat    = agent.heartbeat !== false;
-  cfg.tools        = agent.tools || null;
+  cfg.activeAgent     = agentId;
+  cfg.name            = agent.name || '';
+  cfg.role            = agent.role || '';
+  cfg.color           = agent.color || '';
+  cfg.systemPrompt    = agent.systemPrompt || '';
+  cfg.heartbeatPrompt = agent.heartbeatPrompt || '';
+  cfg.memoryDepth     = agent.memoryDepth != null ? agent.memoryDepth : 10;
+  cfg.heartbeat       = agent.heartbeat !== false;
+  cfg.dreamProducer   = agent.dreamProducer === true;
+  cfg.dreamReceiver   = agent.dreamReceiver !== false;
+  cfg.tools           = agent.tools || null;
 
   // Apply model + endpoint if provided
   if (agent.model)    document.getElementById(`model-${personaId}`).value    = agent.model;
   if (agent.endpoint) {
     const input = document.getElementById(`endpoint-${personaId}`);
-    input.value = agent.endpoint;
-    input.dataset.claudeCli = '';
+    const isCli = agent.endpoint === 'claude-cli';
+    if (isCli) {
+      // Resolve to live proxy URL, same as config.js applyConfig
+      input.value       = state.claudeProxyEndpoint || '';
+      input.placeholder = state.claudeProxyEndpoint ? '' : 'claude-cli (waiting for proxy…)';
+      input.dataset.claudeCli = '1';
+      if (state.claudeProxyEndpoint) {
+        input.title = `Claude CLI OAuth proxy — ${state.claudeProxyEndpoint}`;
+        input.classList.add('oauth-proxy-active');
+      }
+    } else {
+      input.value = agent.endpoint;
+      input.dataset.claudeCli = '';
+      input.title = '';
+      input.classList.remove('oauth-proxy-active');
+    }
   }
 
   // Update UI
@@ -389,7 +321,10 @@ function openSaveAgentModal(personaId) {
   document.getElementById('saveAgentMemoryDepth').value  = cfg.memoryDepth != null ? cfg.memoryDepth : 10;
   document.getElementById('saveAgentHeartbeat').checked   = cfg.heartbeat !== false;
   buildToolsGrid(document.getElementById('saveAgentTools'), cfg.tools || null);
-  document.getElementById('saveAgentSystemPrompt').value = cfg.systemPrompt || p.systemPrompt || '';
+  document.getElementById('saveAgentSystemPrompt').value     = cfg.systemPrompt || p.systemPrompt || '';
+  document.getElementById('saveAgentHeartbeatPrompt').value  = cfg.heartbeatPrompt || '';
+  document.getElementById('saveAgentDreamProducer').checked  = cfg.dreamProducer === true;
+  document.getElementById('saveAgentDreamReceiver').checked  = cfg.dreamReceiver !== false;
   document.getElementById('saveAgentStatus').textContent = '';
 
   const overlay = document.getElementById('saveAgentOverlay');
@@ -411,17 +346,25 @@ function openSaveAgentModal(personaId) {
       return;
     }
 
+    const endpointInput = document.getElementById(`endpoint-${personaId}`);
+    const endpointToSave = endpointInput.dataset.claudeCli === '1' ? 'claude-cli' : endpointInput.value;
+
+    const hbPrompt = document.getElementById('saveAgentHeartbeatPrompt').value.trim();
+
     const agent = {
-      id:           'agent-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      id:              'agent-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name,
       role,
-      color:        cfg.color || p.color,
-      systemPrompt: prompt,
-      model:        document.getElementById(`model-${personaId}`).value,
-      endpoint:     document.getElementById(`endpoint-${personaId}`).value,
-      memoryDepth:  Math.max(0, Math.min(20, depth)),
-      heartbeat:    document.getElementById('saveAgentHeartbeat').checked,
-      tools:        readToolsGrid(document.getElementById('saveAgentTools')),
+      color:           cfg.color || p.color,
+      systemPrompt:    prompt,
+      heartbeatPrompt: hbPrompt || '',
+      model:           document.getElementById(`model-${personaId}`).value,
+      endpoint:        endpointToSave,
+      memoryDepth:     Math.max(0, Math.min(20, depth)),
+      heartbeat:       document.getElementById('saveAgentHeartbeat').checked,
+      dreamProducer:   document.getElementById('saveAgentDreamProducer').checked,
+      dreamReceiver:   document.getElementById('saveAgentDreamReceiver').checked,
+      tools:           readToolsGrid(document.getElementById('saveAgentTools')),
     };
 
     if (!state.config.agents) state.config.agents = [];
@@ -467,6 +410,24 @@ export function initEntitySettingsListeners() {
   document.getElementById('entityHeartbeat').addEventListener('change', e => {
     if (!entitySettingsPersonaId) return;
     state.config[entitySettingsPersonaId].heartbeat = e.target.checked;
+    scheduleSave();
+  });
+
+  document.getElementById('entityDreamProducer').addEventListener('change', e => {
+    if (!entitySettingsPersonaId) return;
+    state.config[entitySettingsPersonaId].dreamProducer = e.target.checked;
+    scheduleSave();
+  });
+
+  document.getElementById('entityDreamReceiver').addEventListener('change', e => {
+    if (!entitySettingsPersonaId) return;
+    state.config[entitySettingsPersonaId].dreamReceiver = e.target.checked;
+    scheduleSave();
+  });
+
+  document.getElementById('entityHeartbeatPrompt').addEventListener('input', e => {
+    if (!entitySettingsPersonaId) return;
+    state.config[entitySettingsPersonaId].heartbeatPrompt = e.target.value;
     scheduleSave();
   });
 

@@ -133,6 +133,7 @@ const SQL_MESSAGES = `
     reply_to_id   INTEGER     REFERENCES messages(id) ON DELETE SET NULL,
     is_read       BOOLEAN     NOT NULL DEFAULT FALSE,
     read_at       TIMESTAMPTZ,
+    responded_at  TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     search_vector TSVECTOR
   );
@@ -250,6 +251,86 @@ const SQL_GRAPH_ARCHIVE = `
   CREATE INDEX IF NOT EXISTS idx_archive_to   ON graph_archive(to_id);
 `;
 
+// ── 7. Governance / voting tables ────────────────────────────────────────────
+const SQL_VOTES = `
+  CREATE TABLE IF NOT EXISTS votes (
+    id            SERIAL      PRIMARY KEY,
+    proposer      TEXT        NOT NULL,
+    title         TEXT        NOT NULL,
+    description   TEXT        NOT NULL DEFAULT '',
+    options       JSONB,
+    status        TEXT        NOT NULL DEFAULT 'open'
+                              CHECK (status IN ('open', 'resolved', 'tabled')),
+    outcome       TEXT,
+    tabled_by     TEXT,
+    tabled_reason TEXT,
+    resolved_at   TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_votes_status   ON votes (status);
+  CREATE INDEX IF NOT EXISTS idx_votes_proposer ON votes (proposer);
+  CREATE INDEX IF NOT EXISTS idx_votes_created  ON votes (created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS ballots (
+    id         SERIAL      PRIMARY KEY,
+    vote_id    INTEGER     NOT NULL REFERENCES votes(id) ON DELETE CASCADE,
+    voter      TEXT        NOT NULL,
+    vote_type  TEXT        NOT NULL CHECK (vote_type IN ('positive', 'negative', 'abstain', 'ranked')),
+    ranking    JSONB,
+    narrative  TEXT        NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(vote_id, voter)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ballots_vote_id ON ballots (vote_id);
+  CREATE INDEX IF NOT EXISTS idx_ballots_voter   ON ballots (voter);
+
+  CREATE TABLE IF NOT EXISTS vote_comments (
+    id         SERIAL      PRIMARY KEY,
+    vote_id    INTEGER     NOT NULL REFERENCES votes(id) ON DELETE CASCADE,
+    author     TEXT        NOT NULL,
+    body       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_vote_comments_vote_id ON vote_comments (vote_id);
+`;
+
+// ── 9. Tender feedback — signal learning loop ────────────────────────────────
+// Records whether the colony followed The Tender's save counsel.
+// Over time, thresholds recalibrate toward actual colony behavior.
+const SQL_TENDER_FEEDBACK = `
+  CREATE TABLE IF NOT EXISTS tender_feedback (
+    id           SERIAL      PRIMARY KEY,
+    persona_id   TEXT        NOT NULL,
+    signal_score FLOAT       NOT NULL,
+    was_saved    BOOLEAN     NOT NULL,
+    text_hash    TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tender_feedback_persona  ON tender_feedback(persona_id);
+  CREATE INDEX IF NOT EXISTS idx_tender_feedback_created  ON tender_feedback(created_at DESC);
+`;
+
+// ── 8. Dream pipeline stages ─────────────────────────────────────────────────
+const SQL_DREAM_STAGES = `
+  CREATE TABLE IF NOT EXISTS dream_stages (
+    id         SERIAL      PRIMARY KEY,
+    dream_id   TEXT        NOT NULL,
+    coil       INTEGER     NOT NULL CHECK (coil >= 1 AND coil <= 5),
+    stage      TEXT        NOT NULL CHECK (stage IN ('A', 'B', 'C')),
+    persona_id TEXT        NOT NULL,
+    input      TEXT,
+    output     TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_dream_stages_dream_id ON dream_stages(dream_id);
+  CREATE INDEX IF NOT EXISTS idx_dream_stages_created  ON dream_stages(created_at DESC);
+`;
+
 // ─── Schema init ───────────────────────────────────────────────────────────────
 // Each section runs as an independent query so a failure in one never blocks
 // the others.  All statements are idempotent (IF NOT EXISTS / OR REPLACE).
@@ -293,6 +374,13 @@ async function init() {
     // 3. Colony messaging (independent of memories)
     await runSection(client, 'messages table', SQL_MESSAGES);
 
+    // 3b. Migration: add responded_at column if missing (existing DBs)
+    try {
+      await client.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ
+      `);
+    } catch { /* non-fatal — column may already exist or ALTER not supported */ }
+
     // 4. Memory linking (depends on memories table existing — runs after)
     await runSection(client, 'memory_links table', SQL_MEMORY_LINKS);
 
@@ -311,6 +399,45 @@ async function init() {
     } catch (err) {
       console.error('[db] ✗ graph_archive table:', err.message);
     }
+
+    // 7. Governance / voting tables (independent, non-fatal)
+    try {
+      await client.query(SQL_VOTES);
+      console.log('[db] ✓ governance tables (votes, ballots, vote_comments)');
+    } catch (err) {
+      console.error('[db] ✗ governance tables:', err.message);
+    }
+
+    // 7b. Migration: add ranked choice columns if missing (existing DBs)
+    try {
+      await client.query(`ALTER TABLE votes ADD COLUMN IF NOT EXISTS options JSONB`);
+      await client.query(`ALTER TABLE ballots ADD COLUMN IF NOT EXISTS ranking JSONB`);
+      // Relax CHECK constraint to allow 'ranked' vote_type
+      await client.query(`ALTER TABLE ballots DROP CONSTRAINT IF EXISTS ballots_vote_type_check`);
+      await client.query(`ALTER TABLE ballots ADD CONSTRAINT ballots_vote_type_check CHECK (vote_type IN ('positive', 'negative', 'abstain', 'ranked'))`);
+    } catch { /* non-fatal */ }
+
+    // 8. Dream pipeline stages (independent, non-fatal)
+    try {
+      await client.query(SQL_DREAM_STAGES);
+      console.log('[db] ✓ dream_stages table');
+    } catch (err) {
+      console.error('[db] ✗ dream_stages table:', err.message);
+    }
+
+    // 9. Tender feedback (independent, non-fatal)
+    try {
+      await client.query(SQL_TENDER_FEEDBACK);
+      console.log('[db] ✓ tender_feedback table');
+    } catch (err) {
+      console.error('[db] ✗ tender_feedback table:', err.message);
+    }
+
+    // 8b. Migration: relax coil constraint from (1,2) to (1-5) for configurable coils
+    try {
+      await client.query(`ALTER TABLE dream_stages DROP CONSTRAINT IF EXISTS dream_stages_coil_check`);
+      await client.query(`ALTER TABLE dream_stages ADD CONSTRAINT dream_stages_coil_check CHECK (coil >= 1 AND coil <= 5)`);
+    } catch { /* non-fatal */ }
 
     console.log('[db] Schema ready.');
   } finally {

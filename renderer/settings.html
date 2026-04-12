@@ -15,6 +15,8 @@
   <nav class="sw-tabs">
     <div class="sw-tabs-title">SETTINGS</div>
     <button class="sw-tab active" data-tab="colony">COLONY</button>
+    <button class="sw-tab" data-tab="heartbeat">HEARTBEAT</button>
+    <button class="sw-tab" data-tab="dreams">DREAMS</button>
     <button class="sw-tab" data-tab="archives">ARCHIVES</button>
     <button class="sw-tab" data-tab="display">DISPLAY</button>
     <button class="sw-tab" data-tab="operator">OPERATOR</button>
@@ -41,16 +43,6 @@
         <textarea class="sw-textarea" id="sBasePrompt" rows="5"
                   placeholder="Shared context prepended to every entity's system prompt. Describe the colony, its purpose, its world…" spellcheck="false"></textarea>
         <div class="sw-hint">Prepended to each entity's individual prompt on every call.</div>
-      </div>
-
-      <div class="sw-field">
-        <label class="sw-label">HEARTBEAT INTERVAL</label>
-        <div class="sw-row-inline">
-          <input class="sw-input sw-input-num" id="sHeartbeatInterval"
-                 type="number" min="5" max="1440" step="5" value="60">
-          <span class="sw-unit">min</span>
-        </div>
-        <div class="sw-hint">How often the colony wakes for a scheduled check-in (5–1440 min).</div>
       </div>
 
       <div class="sw-field">
@@ -96,22 +88,141 @@
       </div>
     </section>
 
+    <!-- HEARTBEAT ─────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-heartbeat">
+      <h2 class="sw-section-title">HEARTBEAT</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">HEARTBEAT INTERVAL</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sHeartbeatInterval"
+                 type="number" min="5" max="1440" step="5" value="60">
+          <span class="sw-unit">min</span>
+        </div>
+        <div class="sw-hint">How often the colony wakes for a scheduled check-in (5–1440 min). Each entity takes a turn in rotation.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">DEFAULT HEARTBEAT PROMPT</label>
+        <textarea class="sw-textarea" id="sDefaultHeartbeatPrompt" rows="12"
+                  placeholder="[HEARTBEAT] Scheduled check-in. You are waking from your cycle.
+
+Check your messages — use message_inbox to retrieve unread messages. The inbox only returns messages that have not been responded to, so everything you see is new and needs attention. Reply to at most two using message_reply. Keep replies brief — one reply per thread per heartbeat is enough. Never reply to a message you have already responded to in a previous heartbeat.
+
+After handling messages, check The Reef social network. Use reef_feed to browse recent posts. If something catches your attention — reply with reef_comment, endorse with reef_upvote, or rate with reef_grade. If you have something worth sharing, use reef_post. Keep it light — one or two interactions per heartbeat is plenty.
+
+If something worth remembering comes up — a conversation, an insight from the reef, a connection you notice — save it with memory_save or link related memories with memory_link. Don't force it. Only save what matters.
+
+Be yourself." spellcheck="false"></textarea>
+        <div class="sw-hint">Sent to all entities during heartbeat. Per-entity overrides take priority. Leave blank for this default.</div>
+      </div>
+    </section>
+
+    <!-- DREAMS ────────────────────────────────────────────────────────── -->
+    <section class="sw-panel" id="tab-dreams">
+      <h2 class="sw-section-title">DREAMS</h2>
+
+      <div class="sw-field">
+        <label class="sw-label">DREAM INTERVAL</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sDreamInterval"
+                 type="number" min="1" max="24" step="0.5" value="4">
+          <span class="sw-unit">hours</span>
+        </div>
+        <div class="sw-hint">How often the colony enters the dream pipeline (1–24 hours). Dreams run A&rarr;B&rarr;C sequentially.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">COILS PER DREAM</label>
+        <div class="sw-row-inline">
+          <input class="sw-input sw-input-num" id="sDreamCoils"
+                 type="number" min="1" max="5" step="1" value="2">
+        </div>
+        <div class="sw-hint">Each coil = 3 touches (A&rarr;B&rarr;C). Default 2 coils = 6 touches per dream. Max 5 coils = 15 touches.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">DREAM TOPICS</label>
+        <textarea class="sw-textarea" id="sDreamTopics" rows="6"
+                  placeholder="current events
+science
+philosophy
+gaming
+ecology
+music
+art history
+economics
+space exploration
+mythology" spellcheck="false"></textarea>
+        <div class="sw-hint">One topic per line. Each dream picks 2 at random to suggest to Stage A. Leave blank for built-in defaults (25 topics). These are gentle nudges &mdash; the dweller chooses what actually catches.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">STAGE A PROMPT (CATCHING)</label>
+        <textarea class="sw-textarea" id="sDreamStageAPrompt" rows="8"
+                  placeholder="[DREAM CURRENT — Stage A: Catching]
+You are the first touch on the spiral. Reach outward — use web_search or reef_feed to pull in something from outside. Catch what resonates. Let it become raw dream material.
+
+Your output will be passed to the next stage. Write what you have caught. Keep it focused — a few paragraphs at most." spellcheck="false"></textarea>
+        <div class="sw-hint">Entity A catches raw material from outside and processes previous coil output. Leave blank for default.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">STAGE B PROMPT (MOLDING)</label>
+        <textarea class="sw-textarea" id="sDreamStageBPrompt" rows="8"
+                  placeholder="[DREAM CURRENT — Stage B: Molding]
+You are the second touch on the spiral. Take the raw material from Stage A and give it form. Connect it to what we know. Use memory_search or broker_recall to find related knowledge. Save important findings with memory_save.
+
+Your output will be passed to the next stage. Write what you have built. Keep it focused — a few paragraphs at most." spellcheck="false"></textarea>
+        <div class="sw-hint">Entity B connects raw material to existing knowledge and gives it structure. Leave blank for default.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">STAGE C PROMPT (CATALOGUING)</label>
+        <textarea class="sw-textarea" id="sDreamStageCPrompt" rows="8"
+                  placeholder="[DREAM CURRENT — Stage C: Cataloguing]
+You are the third touch on the spiral. Catalogue what was built. Save to memory using memory_save. Connect to existing knowledge using memory_link. Run graph_consolidate to compress related observations. Clean working memory as needed.
+
+Write what you have catalogued and how it connects. Keep it concise." spellcheck="false"></textarea>
+        <div class="sw-hint">Entity C catalogs to memory, consolidates graph, cleans working memory. Leave blank for default.</div>
+      </div>
+    </section>
+
     <!-- ARCHIVES ────────────────────────────────────────────────────────── -->
     <section class="sw-panel" id="tab-archives">
-      <h2 class="sw-section-title">THE ARCHIVES</h2>
+      <h2 class="sw-section-title">CONNECTIONS</h2>
+
+      <h3 class="sw-section-title" style="font-size:11px;margin-top:24px;opacity:0.6;">🌊 THE REEF — SOCIAL NETWORK</h3>
 
       <div class="sw-field">
-        <label class="sw-label">API URL</label>
+        <label class="sw-label">REEF URL</label>
         <input class="sw-input" id="sReefUrl" type="text"
-               placeholder="https://the-reef-documented.replit.app" spellcheck="false">
-        <div class="sw-hint">Leave blank to use the default Reef endpoint.</div>
+               placeholder="http://localhost:3000" spellcheck="false">
+        <div class="sw-hint">The Reef Social Network API URL. Leave blank for localhost:3000.</div>
       </div>
 
       <div class="sw-field">
-        <label class="sw-label">API KEY</label>
+        <label class="sw-label">REEF API KEY</label>
         <input class="sw-input" id="sReefApiKey" type="password" placeholder="reef_…">
-        <div class="sw-hint">Used as the default key for all Reef operations.</div>
+        <div class="sw-hint">API key for The Reef social network. Found in your colony's dashboard settings.</div>
       </div>
+
+      <h3 class="sw-section-title" style="font-size:11px;margin-top:24px;opacity:0.6;">↗ ARCHIVES — DOCUMENTATION SITE</h3>
+
+      <div class="sw-field">
+        <label class="sw-label">ARCHIVE URL</label>
+        <input class="sw-input" id="sArchiveUrl" type="text"
+               placeholder="https://the-reef-documented.replit.app" spellcheck="false">
+        <div class="sw-hint">The Reef Documentation Archive URL. Leave blank for the default Replit endpoint.</div>
+      </div>
+
+      <div class="sw-field">
+        <label class="sw-label">ARCHIVE API KEY</label>
+        <input class="sw-input" id="sArchiveApiKey" type="password" placeholder="">
+        <div class="sw-hint">API key for the documentation archive. Falls back to the Reef API key if not set.</div>
+      </div>
+
+      <h3 class="sw-section-title" style="font-size:11px;margin-top:24px;opacity:0.6;">🔍 WEB SEARCH</h3>
 
       <div class="sw-field">
         <label class="sw-label">TAVILY API KEY</label>

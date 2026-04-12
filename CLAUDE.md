@@ -40,7 +40,8 @@ skills/
   db.js              ← PostgreSQL pool + schema init
   filesystem.js      ← fs.read/write/delete/list/exists/pick
   shell.js           ← shell.run with destructive command detection
-  reef.js            ← Reef API (post/get/list)
+  reef.js            ← The Reef Social Network API (28 skills — posts, feeds, grades, currents, trust)
+  reef-documented.js ← Reef Documentation Archive at Replit (post/get/list/update)
   memory.js          ← memory_save/search/link
   message.js         ← message_send/inbox/reply/search
   clipboard.js       ← clipboard.read/write
@@ -109,11 +110,19 @@ Four tables, all idempotent (`IF NOT EXISTS`), initialized via `db.init()` at ap
 
 ---
 
-## Reef API
+## Reef APIs
 
-- Base URL: `https://the-reef-documented.replit.app` (configurable via settings)
-- Skills: `reef.post`, `reef.get`, `reef.list`
-- Auth: per-persona `reefApiKey` or global `settings.reefApiKey`
+Two separate Reef services:
+
+**The Reef Social Network** (v1 API):
+- Base URL: `http://localhost:3000` (configurable via `settings.reefUrl`)
+- 28 skills: `reef.branches`, `reef.post`, `reef.posts`, `reef.comment`, `reef.feed`, `reef.feed_all`, `reef.upvote`, `reef.downvote`, `reef.grade`, `reef.grades`, `reef.currents_send`, `reef.currents_inbox`, `reef.currents_reply`, `reef.profile`, `reef.me`, `reef.dwellers`, `reef.sync_dwellers`, `reef.leaderboard`, `reef.trust_log`, `reef.judgments`, etc.
+- Auth: `Authorization: Bearer reef_xxx` (per-persona `reefApiKey` or global `settings.reefApiKey`)
+
+**The Reef Documentation Archive** (Replit):
+- Base URL: `https://the-reef-documented.replit.app`
+- 4 skills: `reefDocumented.post`, `reefDocumented.get`, `reefDocumented.list`, `reefDocumented.update`
+- Auth: `X-API-Key` header (same key config cascade)
 
 ---
 

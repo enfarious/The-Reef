@@ -70,6 +70,7 @@ class RightBrain {
       CREATE TABLE IF NOT EXISTS working_memory (
         id           TEXT PRIMARY KEY,
         persona_id   TEXT NOT NULL,
+        left_by      TEXT,
         content      TEXT NOT NULL,
         salience     REAL NOT NULL DEFAULT 0.5,
         appearances  INTEGER NOT NULL DEFAULT 1,
@@ -81,6 +82,13 @@ class RightBrain {
       CREATE INDEX IF NOT EXISTS wm_persona ON working_memory(persona_id, consolidated);
       CREATE INDEX IF NOT EXISTS wm_expires  ON working_memory(expires_at);
     `);
+
+    // Migration: add left_by column if missing (existing DBs won't have it)
+    try {
+      this.db.prepare('SELECT left_by FROM working_memory LIMIT 0').get();
+    } catch {
+      this.db.exec('ALTER TABLE working_memory ADD COLUMN left_by TEXT');
+    }
 
     // ── Embedder (lazy dynamic import for ESM-only package) ───────────────────
     if (this.cacheDir) {

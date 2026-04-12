@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self';">
+<title>The Reef — Dreams</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="inspector.css">
+<style>
+  .dream-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .dream-badge.complete  { color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+  .dream-badge.progress  { color: var(--accent); border: 1px solid rgba(0,229,200,0.3); }
+
+  .dream-touches {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .coil-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .coil-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .stage-row {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .stage-header {
+    display: flex; gap: 10px; align-items: baseline;
+    margin-bottom: 4px;
+  }
+  .stage-persona {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    min-width: 20px;
+  }
+  .stage-persona.A { color: var(--biolume-a, #00e5c8); }
+  .stage-persona.B { color: var(--biolume-b, #ff6b9d); }
+  .stage-persona.C { color: var(--biolume-c, #b794f6); }
+  .stage-role {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+  .stage-date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-left: auto;
+  }
+  .dream-detail-container {
+    display: none;
+  }
+  .card.expanded .dream-detail-container {
+    display: block;
+  }
+
+  .stage-input {
+    font-size: 0.88rem;
+    color: var(--text-faint);
+    font-style: italic;
+    padding: 6px 0 6px 30px;
+    max-height: 80px;
+    overflow: hidden;
+    opacity: 0.6;
+  }
+  .stage-output {
+    font-size: 0.95rem;
+    color: var(--text-mid);
+    padding: 6px 0 6px 30px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div class="insp-shell">
+  <div class="insp-header">
+    <span class="insp-title">&#127744; DREAMS</span>
+    <button class="insp-btn" id="refreshBtn">&#10227; REFRESH</button>
+  </div>
+  <div class="insp-body">
+    <div class="card-list" id="cardList">
+      <div class="insp-empty"><div class="insp-empty-glyph">&#127744;</div>LOADING...</div>
+    </div>
+  </div>
+  <div class="insp-footer" id="statusBar">&mdash;</div>
+</div>
+<script src="dreams.js"></script>
+</body>
+</html>

@@ -223,6 +223,56 @@ export function appendToolResultIndicator(id, toolName, resultStr) {
   msgs.scrollTop = msgs.scrollHeight;
 }
 
+// ─── Deep dive indicator ────────────────────────────────────────────────────
+
+export function appendDeepDiveStart(id, goal) {
+  const msgs = document.getElementById(`msgs-${id}`);
+  const div  = document.createElement('div');
+  div.className = 'message assistant-msg deep-dive-group';
+  div.id = `dive-${id}`;
+  const goalPreview = goal.length > 80 ? goal.slice(0, 80) + '…' : goal;
+  div.innerHTML = `
+    <div class="deep-dive-header">
+      <span class="deep-dive-icon">⧫</span> DEEP DIVE
+      <span class="deep-dive-goal">${escHtml(goalPreview)}</span>
+      <span class="deep-dive-spinner">◌</span>
+    </div>
+    <div class="deep-dive-tools"></div>`;
+  const thinkInd = document.getElementById(`thinking-${id}`);
+  if (thinkInd) msgs.insertBefore(div, thinkInd);
+  else          msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+export function appendDeepDiveTool(id, toolName, isResult = false, preview = '') {
+  const group = document.getElementById(`dive-${id}`);
+  if (!group) return;
+  const container = group.querySelector('.deep-dive-tools');
+  const display = toolName.replace(/_/g, '.');
+  const el = document.createElement('div');
+  el.className = isResult ? 'deep-dive-tool-result' : 'deep-dive-tool-call';
+  el.innerHTML = isResult
+    ? `<span class="deep-dive-check">✓</span> ${escHtml(display)}`
+    : `<span class="deep-dive-arrow">▸</span> ${escHtml(display)}`;
+  container.appendChild(el);
+  const msgs = document.getElementById(`msgs-${id}`);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+export function finalizeDeepDive(id, toolCount, elapsedMs) {
+  const group = document.getElementById(`dive-${id}`);
+  if (!group) return;
+  group.querySelector('.deep-dive-spinner')?.remove();
+  const secs = (elapsedMs / 1000).toFixed(1);
+  const footer = document.createElement('div');
+  footer.className = 'deep-dive-footer';
+  footer.textContent = `⧫ SURFACED — ${toolCount} tool call${toolCount === 1 ? '' : 's'}, ${secs}s`;
+  group.appendChild(footer);
+  // Clear the dive id so a new dive can reuse it
+  group.removeAttribute('id');
+}
+
 export function appendTransmissionMsg(id, fromName, message) {
   const msgs    = document.getElementById(`msgs-${id}`);
   const div     = document.createElement('div');

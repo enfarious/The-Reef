@@ -6,6 +6,16 @@ let allEntries = [];
 let debounceTimer = null;
 let reefBaseUrl = 'https://the-reef-documented.replit.app';
 
+// Load archive URL from config if available
+(async () => {
+  try {
+    const cfg = await window.reef.loadConfig();
+    if (cfg?.ok && cfg.result?.settings?.archiveUrl) {
+      reefBaseUrl = cfg.result.settings.archiveUrl;
+    }
+  } catch { /* use default */ }
+})();
+
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -90,7 +100,7 @@ async function load() {
   document.getElementById('statusBar').textContent = 'fetching from Reef…';
 
   try {
-    const result = await window.reef.invoke('reef.list', {});
+    const result = await window.reef.invoke('reefDocumented.list', {});
 
     if (!result.ok) {
       document.getElementById('cardList').innerHTML =
