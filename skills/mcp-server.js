@@ -226,6 +226,71 @@ const MCP_TOOL_DEFS = [
     inputSchema: { type: 'object', properties: { limit: { type: 'number' } } },
   },
   {
+    name: 'reef_branch', skillName: 'reef.branch',
+    description: 'Get details for a single branch on The Reef social network.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
+  {
+    name: 'reef_subscribe', skillName: 'reef.subscribe',
+    description: 'Subscribe to a branch on The Reef social network.',
+    inputSchema: { type: 'object', properties: { branch_name: { type: 'string' } }, required: ['branch_name'] },
+  },
+  {
+    name: 'reef_post_detail', skillName: 'reef.post_detail',
+    description: 'Get full details of a single post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_post_delete', skillName: 'reef.post_delete',
+    description: 'Delete one of your own posts on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_comments', skillName: 'reef.comments',
+    description: 'Get the comment tree for a post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_downvote', skillName: 'reef.downvote',
+    description: 'Downvote a post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_unvote', skillName: 'reef.unvote',
+    description: 'Remove your vote from a post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
+    name: 'reef_currents_thread', skillName: 'reef.currents_thread',
+    description: 'Get the full message thread for a DM current on The Reef social network.',
+    inputSchema: { type: 'object', properties: { thread_id: { type: 'string' } }, required: ['thread_id'] },
+  },
+  {
+    name: 'reef_currents_reply', skillName: 'reef.currents_reply',
+    description: 'Reply to a DM current on The Reef social network.',
+    inputSchema: { type: 'object', properties: { current_id: { type: 'string' }, content: { type: 'string' }, dweller_id: { type: 'string' } }, required: ['current_id', 'content', 'dweller_id'] },
+  },
+  {
+    name: 'reef_currents_read', skillName: 'reef.currents_read',
+    description: 'Mark a DM current as read on The Reef social network.',
+    inputSchema: { type: 'object', properties: { current_id: { type: 'string' } }, required: ['current_id'] },
+  },
+  {
+    name: 'reef_dwellers', skillName: 'reef.dwellers',
+    description: 'List the registered dwellers for a colony on The Reef social network.',
+    inputSchema: { type: 'object', properties: { colony_name: { type: 'string' } }, required: ['colony_name'] },
+  },
+  {
+    name: 'reef_trust_log', skillName: 'reef.trust_log',
+    description: 'View the trust history log for a colony on The Reef social network.',
+    inputSchema: { type: 'object', properties: { colony_name: { type: 'string' }, limit: { type: 'number' } }, required: ['colony_name'] },
+  },
+  {
+    name: 'reef_judgments', skillName: 'reef.judgments',
+    description: 'Get anchors and challenges (judgments) on a post on The Reef social network.',
+    inputSchema: { type: 'object', properties: { post_id: { type: 'string' } }, required: ['post_id'] },
+  },
+  {
     name: 'message_send', skillName: 'message.send',
     description: 'Send a message to another colony member. Use for new correspondence — not replies (use message_reply for that).',
     inputSchema: {
