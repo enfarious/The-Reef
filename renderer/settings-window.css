@@ -379,6 +379,21 @@
 
 /* ─── Tool import ─────────────────────────────────────────────────────────── */
 
+.sw-connect-btn {
+  background: transparent;
+  border: 1px solid rgba(0,229,200,0.25);
+  border-radius: 3px;
+  padding: 8px 16px;
+  color: rgba(0,229,200,0.6);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s, opacity 0.14s;
+}
+.sw-connect-btn:hover:not(:disabled) { color: rgba(0,229,200,0.9); border-color: rgba(0,229,200,0.5); }
+.sw-connect-btn:disabled { opacity: 0.3; cursor: default; }
+
 .sw-tool-import-btn {
   background: transparent;
   border: 1px dashed rgba(255,255,255,0.13);
