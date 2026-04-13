@@ -11,6 +11,10 @@
 //     (default 2, max 5). Every stage persisted for the dream viewer.
 
 import { PERSONAS, state } from './state.js';
+
+function getColonyName() {
+  return state.config.settings.colonyName || 'The Reef';
+}
 import { maybeAutoCompact } from './context.js';
 import { personaHasApiAccess } from './context.js';
 
@@ -193,11 +197,13 @@ export async function runHeartbeatFor(personaId, { manual = false } = {}) {
   }
 
   // Prompt resolution: per-entity custom → global settings default → hardcoded
+  // Substitute colony name so "The Reef" in defaults reflects the configured name.
   const cfg = state.config[personaId];
   const customPrompt = (cfg.heartbeatPrompt || '').trim();
-  const heartbeatPrompt = customPrompt
+  const rawPrompt = customPrompt
     || (state.config.settings.defaultHeartbeatPrompt || '').trim()
     || DEFAULT_HEARTBEAT_PROMPT;
+  const heartbeatPrompt = rawPrompt.replaceAll('The Reef', getColonyName());
 
   await _sendToPersona(personaId, { isHeartbeat: true, heartbeatPrompt });
 
@@ -339,14 +345,7 @@ export function startHeartbeat() {
     }, slotMs);
   }
 
-  // First beat after 30s settle
-  heartbeatTimeout = setTimeout(async () => {
-    heartbeatTimeout = null;
-    const id = order[idx];
-    idx = (idx + 1) % order.length;
-    await runHeartbeatFor(id);
-    scheduleNext();
-  }, 30_000);
+  scheduleNext();
 }
 
 // ─── Dream scheduler (sleeping) ─────────────────────────────────────────────
@@ -365,12 +364,7 @@ export function startDreams() {
     }, ms);
   }
 
-  // First dream after 2 minutes settle
-  dreamTimeout = setTimeout(async () => {
-    dreamTimeout = null;
-    await runDreamCycle();
-    scheduleDream();
-  }, 2 * 60 * 1000);
+  scheduleDream();
 }
 
 export function stopDreams() {

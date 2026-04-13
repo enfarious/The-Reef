@@ -6,6 +6,10 @@
 
 import { PERSONAS, state } from './state.js';
 
+function getColonyName() {
+  return state.config.settings.colonyName || 'The Reef';
+}
+
 export const TOOL_DEFS = [
   {
     name: 'fs_read', skillName: 'fs.read',
@@ -903,8 +907,11 @@ export function contextualToolDefs(personaId, conversationMessages, { heartbeat 
 
   const customs = customTools.filter(t => toolStates[t.name] !== false);
 
+  const colonyName = getColonyName();
+
   return [...builtins, ...customs].map(t => {
-    const { name, description, input_schema } = t;
+    const { name, input_schema } = t;
+    const description = t.description.replaceAll('The Reef', colonyName);
     if (name === 'colony_ask') {
       return {
         name, description,
