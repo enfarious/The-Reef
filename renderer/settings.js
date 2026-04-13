@@ -351,6 +351,65 @@ function flash(el) {
   setTimeout(() => el.classList.remove('error'), 1400);
 }
 
+// ─── Reef colony connect ──────────────────────────────────────────────────────
+
+const PERSONA_DEFAULTS = {
+  A: { name: 'Dreamer',   role: 'vision · ideation' },
+  B: { name: 'Builder',   role: 'systems · construction' },
+  C: { name: 'Librarian', role: 'memory · documentation' },
+};
+
+function updateConnectBtn() {
+  const btn = document.getElementById('sReefConnectBtn');
+  if (btn) btn.disabled = !document.getElementById('sReefApiKey')?.value.trim();
+}
+
+document.getElementById('sReefApiKey')?.addEventListener('input', updateConnectBtn);
+
+document.getElementById('sReefConnectBtn')?.addEventListener('click', async () => {
+  const btn    = document.getElementById('sReefConnectBtn');
+  const status = document.getElementById('sReefConnectStatus');
+  const apiKey = document.getElementById('sReefApiKey')?.value.trim();
+  const baseUrl = document.getElementById('sReefUrl')?.value.trim();
+  if (!apiKey) return;
+
+  btn.disabled = true;
+  btn.textContent = 'CONNECTING…';
+  status.textContent = '';
+  status.style.color = '';
+
+  try {
+    const cfg = await window.reef.loadConfig();
+    const personas = cfg?.result || cfg || {};
+
+    const dwellers = ['A', 'B', 'C'].map(id => {
+      const p = personas[id] || {};
+      return {
+        persona_id: id.toLowerCase(),
+        name:       (p.name || PERSONA_DEFAULTS[id].name).trim(),
+        role:       (p.role || PERSONA_DEFAULTS[id].role).trim(),
+      };
+    });
+
+    const result = await window.reef.invoke('reef.sync_dwellers', {
+      dwellers,
+      apiKey,
+      ...(baseUrl ? { baseUrl } : {}),
+    });
+
+    if (result?.ok === false) throw new Error(result.error || 'Unknown error');
+
+    status.textContent = '✓ Dwellers registered successfully.';
+    status.style.color = 'rgba(0,229,200,0.8)';
+  } catch (err) {
+    status.textContent = `✗ ${err.message}`;
+    status.style.color = 'rgba(255,100,80,0.9)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'REGISTER COLONY DWELLERS';
+  }
+});
+
 // ─── Field change listeners ───────────────────────────────────────────────────
 
 ['sColonyName', 'sBasePrompt', 'sReefUrl', 'sReefApiKey', 'sArchiveUrl', 'sArchiveApiKey', 'sTavilyApiKey',
@@ -433,6 +492,7 @@ async function init() {
   // Unwrap to get the actual config object (or fall back to empty).
   loadedCfg = (result?.ok ? result.result : result) ?? {};
   populate(loadedCfg);
+  updateConnectBtn();
 }
 
 init();
