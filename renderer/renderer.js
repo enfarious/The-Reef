@@ -13,7 +13,7 @@ import { buildColony, buildTargetButtons }                     from './lib/colon
 import { scheduleSave, applyConfig, initConfigListeners }      from './lib/config.js';
 import {
   setCompactCallback, getContextWindow, maybeAutoCompact,
-  COMPACT_PROMPT, updateContextCounter, buildIdentitySection, buildOperatorSection,
+  COMPACT_PROMPT, updateContextCounter, buildIdentitySection, buildColonySection, buildOperatorSection,
   buildWorkspaceSection, buildSessionSection, scanProject, updateCwdDisplay, personaHasApiAccess,
 } from './lib/context.js';
 import { setHeartbeatCallbacks, runHeartbeatFor, runDreamCycle, startHeartbeat, startDreams, DEFAULT_HEARTBEAT_PROMPT } from './lib/heartbeat.js';
@@ -378,10 +378,12 @@ async function callPersonaOnce(id, tools = [], integrations = undefined, opts = 
 
   let systemPrompt = basePrompt ? basePrompt + '\n\n' + entityPrompt : entityPrompt;
   const identitySection  = buildIdentitySection(id);
+  const colonySection    = buildColonySection(id);
   const operatorSection  = buildOperatorSection();
   const sessionSection   = buildSessionSection();
   const workspaceSection = buildWorkspaceSection();
   if (identitySection)  systemPrompt = identitySection + '\n\n' + systemPrompt;
+  if (colonySection)    systemPrompt += '\n\n' + colonySection;
   if (operatorSection)  systemPrompt += '\n\n' + operatorSection;
   if (sessionSection)   systemPrompt += '\n\n' + sessionSection;
   if (workspaceSection) systemPrompt += '\n\n' + workspaceSection;
@@ -436,10 +438,12 @@ async function callPersonaStream(id, tools = [], integrations = undefined, opts 
 
   let systemPrompt = basePrompt ? basePrompt + '\n\n' + entityPrompt : entityPrompt;
   const identitySection  = buildIdentitySection(id);
+  const colonySection    = buildColonySection(id);
   const operatorSection  = buildOperatorSection();
   const sessionSection   = buildSessionSection();
   const workspaceSection = buildWorkspaceSection();
   if (identitySection)  systemPrompt = identitySection + '\n\n' + systemPrompt;
+  if (colonySection)    systemPrompt += '\n\n' + colonySection;
   if (operatorSection)  systemPrompt += '\n\n' + operatorSection;
   if (sessionSection)   systemPrompt += '\n\n' + sessionSection;
   if (workspaceSection) systemPrompt += '\n\n' + workspaceSection;

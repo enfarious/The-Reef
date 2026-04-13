@@ -1,6 +1,6 @@
 // ─── Context management, token estimation, operator/workspace sections ───────
 
-import { state, COMPACT_THRESHOLD, DEFAULT_CONTEXT_WINDOW } from './state.js';
+import { PERSONAS, state, COMPACT_THRESHOLD, DEFAULT_CONTEXT_WINDOW } from './state.js';
 
 // Injected callback — compactPersona lives in the orchestrator
 let _compactPersona;
@@ -107,6 +107,17 @@ export function buildIdentitySection(id) {
   if (role)  lines.push(`Role: ${role}`);
   lines.push(`Colony: ${colonyName}`);
   return lines.join('\n');
+}
+
+export function buildColonySection(id) {
+  const others = PERSONAS.filter(p => p.id !== id).map(p => {
+    const cfg  = state.config[p.id] || {};
+    const name = (cfg.name || p.name).trim();
+    const role = (cfg.role || p.role).trim();
+    return role ? `${name} — ${role}` : name;
+  });
+  if (!others.length) return null;
+  return '[COLONY]\n' + others.join('\n');
 }
 
 export function buildOperatorSection() {
