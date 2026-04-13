@@ -94,7 +94,20 @@ export function updateContextCounter(id) {
   }
 }
 
-// ─── Operator & workspace context ────────────────────────────────────────────
+// ─── Identity / operator / workspace context ─────────────────────────────────
+
+export function buildIdentitySection(id) {
+  const cfg        = state.config[id] || {};
+  const name       = (cfg.name  || '').trim();
+  const role       = (cfg.role  || '').trim();
+  const colonyName = (state.config.settings.colonyName || 'The Reef').trim();
+  if (!name && !role) return null;
+  const lines = ['[IDENTITY]'];
+  if (name)  lines.push(`Name: ${name}`);
+  if (role)  lines.push(`Role: ${role}`);
+  lines.push(`Colony: ${colonyName}`);
+  return lines.join('\n');
+}
 
 export function buildOperatorSection() {
   const { operatorName, operatorBirthdate, operatorAbout } = state.config.settings;
