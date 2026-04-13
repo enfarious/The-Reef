@@ -6,7 +6,10 @@ import { state, COMPACT_THRESHOLD, DEFAULT_CONTEXT_WINDOW } from './state.js';
 let _compactPersona;
 export function setCompactCallback(fn) { _compactPersona = fn; }
 
-export function getContextWindow() {
+export function getContextWindow(id) {
+  // Prefer the model's actual loaded context size (reported by LM Studio / API).
+  // Fall back to the user's config setting, then the app default.
+  if (id && state.maxContext[id]) return state.maxContext[id];
   return state.config.settings?.contextWindow || DEFAULT_CONTEXT_WINDOW;
 }
 
@@ -14,7 +17,7 @@ export async function maybeAutoCompact(id) {
   if (state.thinking[id]) return;
   const inToks  = state.lastTokens[id]?.inputTokens  ?? null;
   const outToks = state.lastTokens[id]?.outputTokens ?? null;
-  const ctxWin  = getContextWindow();
+  const ctxWin  = getContextWindow(id);
 
   if (inToks != null) {
     const currentToks = inToks + (outToks ?? 0);
@@ -68,11 +71,11 @@ export function updateContextCounter(id) {
   const breakdown = (hasActual && outToks != null)
     ? `${inToks.toLocaleString()} in + ${outToks.toLocaleString()} out = ${toks.toLocaleString()} tokens`
     : `${prefix}${toks.toLocaleString()} tokens`;
-  const ctxWin   = getContextWindow();
-  const isCustom = !!(state.config.settings?.contextWindow);
-  const winLabel = isCustom
-    ? `${ctxWin >= 1000 ? (ctxWin / 1000).toFixed(0) + 'k' : ctxWin} window`
-    : `${DEFAULT_CONTEXT_WINDOW / 1000}k window (default)`;
+  const ctxWin   = getContextWindow(id);
+  const winSource = state.maxContext[id] ? 'model'
+    : state.config.settings?.contextWindow ? 'config'
+    : 'default';
+  const winLabel = `${ctxWin >= 1000 ? (ctxWin / 1000).toFixed(0) + 'k' : ctxWin} window (${winSource})`;
   const hardMax  = maxCtx
     ? ` · model max: ${maxCtx >= 1000 ? Math.round(maxCtx / 1000) + 'k' : maxCtx}`
     : '';
