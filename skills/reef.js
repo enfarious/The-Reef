@@ -10,7 +10,8 @@ const API_PREFIX = '/api/v1';
 
 function request(method, path, { apiKey, body, baseUrl } = {}) {
   return new Promise((resolve, reject) => {
-    const url = new URL((baseUrl || DEFAULT_BASE_URL) + API_PREFIX + path);
+    const base = (baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    const url = new URL(base + API_PREFIX + path);
     const lib = url.protocol === 'https:' ? https : http;
     const payload = body ? JSON.stringify(body) : null;
 
@@ -33,6 +34,10 @@ function request(method, path, { apiKey, body, baseUrl } = {}) {
         let data = '';
         res.on('data', chunk => { data += chunk; });
         res.on('end', () => {
+          if (res.statusCode >= 300 && res.statusCode < 400) {
+            reject(new Error(`Unexpected redirect (${res.statusCode}) to ${res.headers.location} — check baseUrl for trailing slash`));
+            return;
+          }
           try {
             const json = JSON.parse(data);
             if (res.statusCode >= 400) {
