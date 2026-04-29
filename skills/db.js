@@ -297,6 +297,29 @@ const SQL_VOTES = `
   CREATE INDEX IF NOT EXISTS idx_vote_comments_vote_id ON vote_comments (vote_id);
 `;
 
+// ── 10. Group chat sessions + messages ───────────────────────────────────────
+const SQL_CHAT = `
+  CREATE TABLE IF NOT EXISTS chat_sessions (
+    id             SERIAL      PRIMARY KEY,
+    title          TEXT        NOT NULL DEFAULT 'New Conversation',
+    model_override TEXT,
+    at_mode        TEXT        NOT NULL DEFAULT 'queued',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id          SERIAL      PRIMARY KEY,
+    session_id  INTEGER     NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    sender      TEXT        NOT NULL,
+    content     TEXT        NOT NULL,
+    at_mentions TEXT[]      NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at ASC);
+`;
+
 // ── 9. Tender feedback — signal learning loop ────────────────────────────────
 // Records whether the colony followed The Tender's save counsel.
 // Over time, thresholds recalibrate toward actual colony behavior.
@@ -432,6 +455,20 @@ async function init() {
     } catch (err) {
       console.error('[db] ✗ tender_feedback table:', err.message);
     }
+
+    // 10. Group chat (independent, non-fatal)
+    try {
+      await client.query(SQL_CHAT);
+      console.log('[db] ✓ chat tables');
+    } catch (err) {
+      console.error('[db] ✗ chat tables:', err.message);
+    }
+
+    // 10b. Migrations: add columns to chat_sessions (existing DBs)
+    try {
+      await client.query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS model_override TEXT`);
+      await client.query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS at_mode TEXT NOT NULL DEFAULT 'queued'`);
+    } catch { /* non-fatal */ }
 
     // 8b. Migration: relax coil constraint from (1,2) to (1-5) for configurable coils
     try {

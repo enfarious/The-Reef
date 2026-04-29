@@ -1211,7 +1211,7 @@ header {
 
 .settings-section-title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.2em;
   color: var(--text-dim);
   padding-bottom: 6px;
@@ -1226,7 +1226,7 @@ header {
 
 .settings-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   color: var(--text-dim);
 }
@@ -1237,7 +1237,7 @@ header {
   border-radius: 3px;
   padding: 6px 9px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-mid);
   outline: none;
   transition: border-color 0.2s;
@@ -1248,9 +1248,9 @@ header {
 
 .settings-hint {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 8.5px;
+  font-size: 11px;
   color: var(--text-dim);
-  opacity: 0.6;
+  opacity: 0.8;
   line-height: 1.4;
 }
 
@@ -1266,9 +1266,9 @@ header {
 }
 .settings-unit {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-dim);
-  opacity: 0.7;
+  opacity: 0.8;
   letter-spacing: 0.05em;
 }
 
@@ -1362,13 +1362,13 @@ header {
 }
 .tool-name {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--text-mid);
   display: block;
 }
 .tool-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-dim);
   display: block;
   margin-top: 2px;
@@ -1379,7 +1379,7 @@ header {
 
 .tool-badge {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 7px;
+  font-size: 10px;
   letter-spacing: 0.1em;
   color: var(--text-dim);
   border: 1px solid rgba(255,255,255,0.07);
@@ -1423,7 +1423,7 @@ header {
   border-radius: 3px;
   padding: 7px 9px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.6;
   color: var(--text-mid);
   outline: none;
@@ -1439,7 +1439,7 @@ header {
 }
 .tool-import-actions button {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   padding: 4px 12px;
   border-radius: 3px;
@@ -1461,7 +1461,7 @@ header {
 
 .tool-import-btn {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   padding: 6px 10px;
   width: 100%;
@@ -1481,8 +1481,8 @@ header {
 
 /* Inline optional label helper */
 .settings-label-opt {
-  opacity: 0.38;
-  font-size: 0.82em;
+  opacity: 0.65;
+  font-size: 0.85em;
   letter-spacing: 0.04em;
   font-family: 'JetBrains Mono', monospace;
 }
@@ -1555,7 +1555,7 @@ header {
 }
 .text-color-swatch-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 7px;
+  font-size: 10px;
   letter-spacing: 0.12em;
   color: var(--text-dim);
 }
@@ -1608,7 +1608,7 @@ header {
 .entity-dropdown .settings-hd {
   padding: 11px 14px 10px;
   border-bottom: 1px solid rgba(255,255,255,0.05);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   color: var(--text-mid);
 }
@@ -1623,7 +1623,7 @@ header {
 /* Entity settings flyout header accent (kept for compat) */
 .entity-settings-hd {
   color: var(--text-mid);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 /* Agent picker dropdown */
@@ -1641,7 +1641,7 @@ header {
 
 .agent-picker-section-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.18em;
   color: var(--text-dim);
   padding: 8px 14px 4px;
@@ -1658,7 +1658,7 @@ header {
   background: transparent;
   color: var(--text-mid);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   text-align: left;
   transition: background 0.1s;
@@ -1693,7 +1693,7 @@ header {
 }
 
 .agent-picker-item-role {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -1702,7 +1702,7 @@ header {
 }
 
 .agent-picker-item-depth {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
   flex-shrink: 0;
   margin-left: auto;
@@ -1712,7 +1712,7 @@ header {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
   padding: 2px 4px;
   opacity: 0;
@@ -1739,7 +1739,7 @@ header {
   background: transparent;
   color: var(--text-dim);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   cursor: pointer;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
@@ -1759,7 +1759,7 @@ header {
 
 .agent-tools-category {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   color: var(--text-dim);
   padding: 6px 0 2px;
@@ -1774,7 +1774,7 @@ header {
   align-items: center;
   gap: 4px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-mid);
   padding: 2px 8px 2px 0;
   cursor: pointer;
@@ -1789,7 +1789,7 @@ header {
   align-items: center;
   gap: 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-mid);
   cursor: pointer;
 }

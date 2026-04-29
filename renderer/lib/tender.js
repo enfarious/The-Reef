@@ -34,6 +34,21 @@ const workingMemory = {
   C: { topic: '', entities: new Set(), memories: [], turnsSinceShift: 0 },
 };
 
+// ─── Session activity log ─────────────────────────────────────────────────────
+// Compact record of significant tool actions taken this session, per persona.
+// Persisted to DB for cross-session recall but injected from this in-memory
+// log so there's no duplication with wakeup (which shows pre-session history).
+
+const sessionLog = {
+  A: [], // [{ ts: number (ms), line: string }]
+  B: [],
+  C: [],
+};
+
+const MAX_SESSION_LOG       = 10;
+const ACTIVITY_HEADER       = '--- RECENT ACTIVITY ---';
+const ACTIVITY_FOOTER       = '--- END RECENT ACTIVITY ---';
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WORKING_MEMORY_HEADER = '--- WORKING MEMORY (The Tender) ---';
@@ -41,6 +56,13 @@ const WORKING_MEMORY_FOOTER = '--- END WORKING MEMORY ---';
 const MAX_WORKING_MEMORIES  = 6;    // max memories injected per turn
 const SHIFT_TURN_THRESHOLD  = 3;    // min turns before shift is considered stable
 const ENTITY_MIN_LENGTH     = 3;    // ignore single-char or 2-char tokens as entities
+
+// Tools whose completion warrants an activity log entry
+const LOGGED_TOOLS = new Set([
+  'reef_post', 'reef_comment', 'reef_currents_send',
+  'reef_upvote', 'reef_downvote', 'reef_grade',
+  'message_send',
+]);
 
 // Known stopwords — don't treat these as meaningful entities
 const STOPWORDS = new Set([
@@ -112,6 +134,62 @@ function jaccard(a, b) {
   return union === 0 ? 0 : intersection / union;
 }
 
+// ─── Activity log helpers ─────────────────────────────────────────────────────
+
+function trunc(s, n) {
+  if (!s) return '';
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// Returns a single compact line describing the tool action, or null if not loggable.
+function buildActivityLine(toolName, toolInput) {
+  switch (toolName) {
+    case 'reef_post': {
+      const branch  = trunc(toolInput?.branch || 'general', 20);
+      const content = trunc(toolInput?.content || toolInput?.title || '', 55);
+      return `posted "${content}" (${branch})`;
+    }
+    case 'reef_comment': {
+      const postId = toolInput?.post_id ?? toolInput?.id ?? '?';
+      const body   = trunc(toolInput?.body || toolInput?.content || '', 55);
+      return `commented on post ${postId}: "${body}"`;
+    }
+    case 'reef_currents_send': {
+      const to   = trunc(toolInput?.to || '?', 20);
+      const body = trunc(toolInput?.body || toolInput?.content || '', 50);
+      return `sent currents to ${to}: "${body}"`;
+    }
+    case 'reef_upvote':
+      return `upvoted post ${toolInput?.post_id ?? toolInput?.id ?? '?'}`;
+    case 'reef_downvote':
+      return `downvoted post ${toolInput?.post_id ?? toolInput?.id ?? '?'}`;
+    case 'reef_grade': {
+      const postId = toolInput?.post_id ?? toolInput?.id ?? '?';
+      const grade  = toolInput?.grade ?? toolInput?.score ?? '';
+      return `graded post ${postId}${grade ? ` (${grade})` : ''}`;
+    }
+    case 'message_send': {
+      const to   = trunc(toolInput?.to || '?', 20);
+      const body = trunc(toolInput?.body || toolInput?.subject || '', 50);
+      return `messaged ${to}: "${body}"`;
+    }
+    default:
+      return null;
+  }
+}
+
+function formatActivityBlock(log) {
+  const lines = log.map(({ ts, line }) => {
+    const d = new Date(ts);
+    const mon = d.toLocaleString('en', { month: 'short' });
+    const day = d.getDate();
+    const hh  = String(d.getHours()).padStart(2, '0');
+    const mm  = String(d.getMinutes()).padStart(2, '0');
+    return `${mon} ${day} ${hh}:${mm} · ${line}`;
+  });
+  return `${ACTIVITY_HEADER}\n${lines.join('\n')}\n${ACTIVITY_FOOTER}`;
+}
+
 // ─── System prompt injection ──────────────────────────────────────────────────
 // Replaces (or appends) the [WORKING MEMORY] block in a persona's system prompt.
 // Does not touch the wakeup MEMORY REINTEGRATION block — they coexist.
@@ -131,6 +209,23 @@ function injectWorkingMemoryBlock(personaId, memories) {
 
   const block = formatWorkingMemoryBlock(memories);
   state.config[personaId].systemPrompt = stripped + '\n\n' + block;
+}
+
+function injectActivityBlock(personaId) {
+  const log      = sessionLog[personaId];
+  const existing = (state.config[personaId]?.systemPrompt || '').trim();
+
+  // Strip any previous activity block
+  const stripped = existing
+    .replace(new RegExp(`\\n*${escapeRegex(ACTIVITY_HEADER)}[\\s\\S]*?${escapeRegex(ACTIVITY_FOOTER)}\\s*`, 'g'), '')
+    .trim();
+
+  if (!log.length) {
+    state.config[personaId].systemPrompt = stripped;
+    return;
+  }
+
+  state.config[personaId].systemPrompt = stripped + '\n\n' + formatActivityBlock(log);
 }
 
 function formatWorkingMemoryBlock(memories) {
@@ -257,35 +352,50 @@ export async function tenderPostResponse(personaId, responseText) {
 }
 
 // ─── Core: tool call observation ─────────────────────────────────────────────
-// Called when a tool call fires. Tender observes signals without interfering.
+// Called after a tool call completes. Tender observes signals and logs activity.
+// personaName should be the lowercase persona name (e.g. 'dreamer') for DB storage.
 
-export function tenderObserveTool(personaId, toolName, toolInput) {
+export function tenderObserveTool(personaId, personaName, toolName, toolInput, resultStr) {
   const wm = workingMemory[personaId];
 
+  // ── Entity tracking (existing behaviour) ────────────────────────────────
   switch (toolName) {
     case 'memory_save':
-      // A persona just wrote a memory — note it so we don't duplicate on crystallize
-      if (toolInput?.subject) {
-        wm.entities.add(toolInput.subject.toLowerCase());
-      }
+      if (toolInput?.subject) wm.entities.add(toolInput.subject.toLowerCase());
       break;
-
     case 'memory_search':
-      // A persona searched for something — treat the query as a topic signal
       if (toolInput?.query) {
         const searchEntities = extractEntities(toolInput.query);
         wm.entities = new Set([...wm.entities, ...searchEntities]);
       }
       break;
-
-    case 'reef_post':
-      // Something was published — worth noting in working context that a post was made
-      wm.entities.add('reef_post');
-      break;
-
-    default:
-      break;
   }
+
+  // ── Activity logging for significant external actions ────────────────────
+  if (!LOGGED_TOOLS.has(toolName)) return;
+
+  // Skip if the tool returned an error
+  if (typeof resultStr === 'string' && resultStr.startsWith('Error:')) return;
+
+  const line = buildActivityLine(toolName, toolInput);
+  if (!line) return;
+
+  const log = sessionLog[personaId];
+  log.push({ ts: Date.now(), line });
+  if (log.length > MAX_SESSION_LOG) log.shift();
+
+  // Update the activity block in the system prompt immediately
+  injectActivityBlock(personaId);
+
+  // Persist to memories table so future wakeups surface it (fire and forget)
+  const name = personaName || personaId.toLowerCase();
+  window.reef.invoke('memory.save', {
+    left_by: name,
+    type:    'activity',
+    subject: toolName,
+    body:    line,
+    tags:    ['activity', toolName],
+  }).catch(() => {}); // Tender fails silently
 }
 
 // ─── Flush ────────────────────────────────────────────────────────────────────
@@ -301,7 +411,9 @@ export async function tenderFlush(personaId) {
   wm.entities        = new Set();
   wm.memories        = [];
   wm.turnsSinceShift = 0;
+  sessionLog[personaId] = [];
   injectWorkingMemoryBlock(personaId, []);
+  injectActivityBlock(personaId);
 }
 
 // ─── Consult — the signal ────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ import {
   initConfirmModal, initEntitySettingsListeners,
   openAgentPicker, initAgentPickerListeners,
 } from './lib/modals.js';
-import { tenderFlush, tenderPrePrompt, tenderPostResponse, tenderConsult, tenderRecordFeedback } from './lib/tender.js';
+import { tenderFlush, tenderPrePrompt, tenderPostResponse, tenderConsult, tenderRecordFeedback, tenderObserveTool } from './lib/tender.js';
 
 // ─── Per-persona message queue ───────────────────────────────────────────────
 const messageQueue = { A: [], B: [], C: [] };
@@ -294,6 +294,7 @@ async function sendToPersona(id, { isHeartbeat = false, heartbeatPrompt = null, 
       }
       appendToolResultIndicator(id, tc.name, resultStr);
       toolResults.push({ id: tc.id, content: resultStr, image: imageData });
+      tenderObserveTool(id, (state.config[id]?.name || id).toLowerCase(), tc.name, tc.input, resultStr);
     }
 
     if (respMode === 'anthropic') {
@@ -1129,6 +1130,7 @@ async function init() {
   document.getElementById('openVotes').onclick         = () => window.reef.openWindow('votes');
   document.getElementById('openDreams').onclick        = () => window.reef.openWindow('dreams');
   document.getElementById('openVisualizer').onclick    = () => window.reef.openWindow('visualizer');
+  document.getElementById('openColonyChat').onclick   = () => window.reef.openWindow('colony-chat');
 
   // ─── Governance pulse check ───────────────────────────────────────────────────
   async function checkOpenVotes() {

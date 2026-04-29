@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self';">
+<title>THE REEF — COLONY CHAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="colony-chat.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Left sidebar: session history ── -->
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <span class="sidebar-title">CONVERSATIONS</span>
+      <button id="newSessionBtn" title="New conversation">+</button>
+    </div>
+    <div id="sessionList">
+      <!-- populated by JS -->
+    </div>
+  </aside>
+
+  <!-- ── Main chat area ── -->
+  <main id="chatMain">
+
+    <header id="chatHeader">
+      <div id="chatTitle">Colony Chat</div>
+      <div id="participants">
+        <span class="participant" id="part-A" title="DREAMER">D</span>
+        <span class="participant" id="part-B" title="BUILDER">B</span>
+        <span class="participant" id="part-C" title="LIBRARIAN">L</span>
+        <span class="participant participant-op" id="part-op" title="Operator">Y</span>
+      </div>
+      <div id="atModeWrap" title="How @mentions work in this conversation">
+        <label id="atModeLabel">@ MODE</label>
+        <select id="atModeSelect">
+          <option value="queued">queued</option>
+          <option value="interrupt">interrupt</option>
+        </select>
+      </div>
+      <div id="modelSelectWrap" title="Model for this conversation">
+        <label id="modelSelectLabel">MODEL</label>
+        <select id="modelSelect">
+          <option value="">Per persona</option>
+        </select>
+        <button id="modelRefreshBtn" title="Refresh model list">⟳</button>
+      </div>
+      <div id="rrStatus"></div>
+    </header>
+
+    <div id="feed">
+      <!-- messages rendered here -->
+      <div id="feedEmpty" class="feed-empty">Start a conversation — everyone is listening.</div>
+    </div>
+
+    <footer id="chatFooter">
+      <div id="waitingBanner" style="display:none">
+        <span id="waitingText"></span>
+      </div>
+      <div id="inputRow">
+        <textarea id="chatInput" placeholder="Say something… @Dreamer, @Builder, @Librarian to address directly" rows="1" spellcheck="true"></textarea>
+        <button id="sendBtn">SEND</button>
+      </div>
+    </footer>
+
+  </main>
+
+</div>
+
+<script src="colony-chat.js"></script>
+</body>
+</html>

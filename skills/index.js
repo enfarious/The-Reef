@@ -198,6 +198,16 @@ registry.set('tender.feedback', async (args) => {
   return { recorded: true };
 });
 
+const chatDb = require('./chat-db');
+registry.set('chat.newSession',         chatDb.newSession);
+registry.set('chat.listSessions',       chatDb.listSessions);
+registry.set('chat.loadSession',        chatDb.loadSession);
+registry.set('chat.saveMessage',        chatDb.saveMessage);
+registry.set('chat.updateTitle',        chatDb.updateTitle);
+registry.set('chat.updateModelOverride',chatDb.updateModelOverride);
+registry.set('chat.updateAtMode',       chatDb.updateAtMode);
+registry.set('chat.deleteSession',      chatDb.deleteSession);
+
 module.exports = {
   get: (name) => registry.get(name),
   list: () => [...registry.keys()],

@@ -10,18 +10,40 @@ function normalizePersona(name) {
 
 function formatMemoryBlock(memories) {
   if (!memories.length) return '';
-  const lines = memories.map(m => {
-    const ts = new Date(m.created_at).toISOString().slice(0, 10);
-    // relationship is only present on memories surfaced via graph traversal
-    const linkNote = m.relationship ? ` ↔ ${m.relationship}` : '';
-    const header  = `[${m.type.toUpperCase()} · ${m.left_by} · ${ts}${linkNote}]`;
-    const title   = m.title   ? `${m.title}\n` : '';
-    const subject = m.subject ? `re: ${m.subject}\n` : '';
-    return `${header}\n${title}${subject}${m.body}`;
-  });
-  return `--- MEMORY REINTEGRATION (${new Date().toISOString().slice(0,10)}) ---\n\n` +
-         lines.join('\n\n') +
-         '\n\n---';
+
+  const activities  = [];
+  const regularLines = [];
+
+  for (const m of memories) {
+    if (m.type === 'activity') {
+      // Compact one-liner: "Apr 15 14:23 · posted ..."
+      const d   = new Date(m.created_at);
+      const mon = d.toLocaleString('en', { month: 'short' });
+      const day = d.getDate();
+      const hh  = String(d.getHours()).padStart(2, '0');
+      const mm  = String(d.getMinutes()).padStart(2, '0');
+      activities.push(`${mon} ${day} ${hh}:${mm} · ${m.body}`);
+    } else {
+      const ts      = new Date(m.created_at).toISOString().slice(0, 10);
+      const linkNote = m.relationship ? ` ↔ ${m.relationship}` : '';
+      const header  = `[${m.type.toUpperCase()} · ${m.left_by} · ${ts}${linkNote}]`;
+      const title   = m.title   ? `${m.title}\n` : '';
+      const subject = m.subject ? `re: ${m.subject}\n` : '';
+      regularLines.push(`${header}\n${title}${subject}${m.body}`);
+    }
+  }
+
+  const date  = new Date().toISOString().slice(0, 10);
+  let   block = `--- MEMORY REINTEGRATION (${date}) ---\n\n`;
+
+  if (regularLines.length) block += regularLines.join('\n\n');
+
+  if (activities.length) {
+    if (regularLines.length) block += '\n\n';
+    block += `[recent actions]\n${activities.join('\n')}`;
+  }
+
+  return block + '\n\n---';
 }
 
 // ─── save ──────────────────────────────────────────────────────────────────────
